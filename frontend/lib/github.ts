@@ -43,7 +43,7 @@ export function getGitHubConfig(): GitHubConfig {
       token,
       repo,
       error:
-        'GitHub repo not configured. Set NEXT_PUBLIC_GITHUB_REPO to your owner/repo value, for example Pro-chartist/cool-try.',
+        'GitHub repo not configured. Set NEXT_PUBLIC_GITHUB_REPO to your owner/repo value, for example chartishq-cool/cool-try.',
     };
   }
 
@@ -52,7 +52,7 @@ export function getGitHubConfig(): GitHubConfig {
       token,
       repo,
       error:
-        'Invalid NEXT_PUBLIC_GITHUB_REPO. Use the owner/repo format, for example Pro-chartist/cool-try.',
+        'Invalid NEXT_PUBLIC_GITHUB_REPO. Use the owner/repo format, for example chartishq-cool/cool-try.',
     };
   }
 
