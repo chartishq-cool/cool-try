@@ -4,8 +4,7 @@ Fully parameterized — timeframe, tolerances, all passed at runtime.
 """
 
 import pandas as pd
-from datetime import datetime, timedelta
-from dateutil.relativedelta import relativedelta
+from datetime import datetime
 
 from screeners.avwap_engine import find_anchor_points, calculate_avwap_low
 from screeners.output_formatter import to_tv
@@ -150,6 +149,8 @@ class PullbackScreener:
         for period in self.anchor_periods:
             check = periods[period] = {'status': 'insufficient_history'}
             try:
+                if len(data) < period:
+                    continue
                 anchors = find_anchor_points(data, [period], self.min_periods_old)
 
                 if anchors is None:
@@ -160,8 +161,7 @@ class PullbackScreener:
                 for key, info in anchors.items():
                     avwap = calculate_avwap_low(data, anchor_date=info['date'])
 
-                    check.update(anchor=str(info['date'].date()), status='avwap_unavailable',
-                                 history_short=len(data) < period)
+                    check.update(anchor=str(info['date'].date()), status='avwap_unavailable')
                     if avwap is None:
                         continue
 
@@ -242,7 +242,7 @@ class PullbackScreener:
             self.stocks,
             self.timeframe,
             self.anchor_periods,
-            window=get_history_window(self.timeframe, self.anchor_periods, pullback=True),
+            window=get_history_window(self.timeframe, self.anchor_periods),
         )
 
         for idx, stock in enumerate(self.stocks, 1):

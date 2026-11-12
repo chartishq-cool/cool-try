@@ -7,8 +7,8 @@ Set a strong, randomly generated `ARGUS_ACCESS_KEY` in the frontend deployment e
 
 ### Scan rules and scheduled settings
 
-- Breakout lookbacks use calendar days, weeks, or months. Pullback lookbacks count candles. Breakout tolerance and ceiling are entered as percentages in the dashboard and converted to the existing decimal representation.
-- Daily pullbacks request more history to cover long candle lookbacks. Newly listed or thinly traded stocks can still have fewer candles. Their reports show when a lookback used shorter history. The existing pullback eligibility calculation still runs on the available candles.
+- Both strategies count the latest N candles at the selected timeframe. Breakout anchors at the highest high in that window, and pullback anchors at the lowest eligible low after applying the minimum anchor age. Breakout tolerance and ceiling are entered as percentages in the dashboard and converted to the existing decimal representation.
+- Daily scans request extra calendar history to obtain enough trading candles. Each strategy skips a lookback when the stock has fewer candles than requested and reports insufficient history.
 - The two weekday NSE jobs start at 5:00 a.m. IST (daily) and 5:15 a.m. IST (weekly). Each downloads history once and evaluates both strategies, with separate CSVs and Telegram messages. Pullbacks move earlier from their previous 5:45 and 6:00 starts. GitHub may queue a job after its scheduled time.
 - In the dashboard, choose NSE and daily or weekly, then open **Scheduled NSE settings**. Load the default or the dated override into the form, edit the fields, and save as the recurring default or for a particular weekday (IST). A dated override applies only on that date. Saving after that morning’s scan has started won’t rerun it.
 - The Telegram summary has the scan ID and all matching anchor periods. The following plain-text messages contain just comma-separated TradingView tickers. Paste each message as a separate batch if the list spans multiple messages.

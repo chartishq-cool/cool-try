@@ -42,14 +42,13 @@ class FetchStatus:
     message: str = ''
 
 
-def get_history_window(timeframe, anchor_periods, *, pullback=False, end=None):
+def get_history_window(timeframe, anchor_periods, *, end=None):
     """Return yfinance start/end/interval values for a screener timeframe."""
     end = end or datetime.now()
     max_period = max(anchor_periods)
 
     if timeframe == 'daily':
-        days = max_period * 2 + 100 if pullback else max_period + 100
-        start = end - timedelta(days=days)
+        start = end - timedelta(days=max_period * 2 + 100)
         interval = '1d'
     elif timeframe == 'weekly':
         start = end - timedelta(weeks=max_period + 52)

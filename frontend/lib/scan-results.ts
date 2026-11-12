@@ -2,6 +2,7 @@ import axios from 'axios';
 import { getGitHubAuthHeaders } from './github';
 
 export type ScanSummary = {
+  lookback_unit?: 'candles';
   market: string;
   timeframe: string;
   csv_file: string;
