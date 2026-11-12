@@ -896,7 +896,7 @@ const downloadCsv = async (downloadUrl?: string, filename?: string) => {
 
             {/* Anchor Periods */}
             <ParamInput
-              label={logic === 'pullback' ? 'Anchor Lookbacks (candles)' : `Anchor Lookbacks (${timeframe === 'daily' ? 'days' : timeframe === 'weekly' ? 'weeks' : 'months'})`}
+              label="Anchor Lookbacks (candles)"
               value={anchorPeriods}
               onChange={setAnchorPeriods}
               placeholder="e.g. 52,156,260"
@@ -980,8 +980,8 @@ const downloadCsv = async (downloadUrl?: string, filename?: string) => {
             <label>ARGUS access key <input type="password" autoComplete="current-password" value={accessKey}
               onChange={(e) => setAccessKey(e.target.value)} disabled={loading || presetBusy} /></label>
             <small>{logic === 'breakout'
-              ? 'Calendar lookbacks. Tolerance applies after the sustain candles.'
-              : 'Candle lookbacks. A cross counts one stretch below AVWAP, regardless of length.'} Turnover uses the latest candle.</small>
+              ? 'Uses the latest N candles at the selected timeframe. Tolerance applies after the sustain candles.'
+              : 'Uses the latest N candles at the selected timeframe. A cross counts one stretch below AVWAP.'} Turnover uses the latest candle.</small>
           </div>
         </form>
       </div>

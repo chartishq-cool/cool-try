@@ -80,7 +80,7 @@ export default function ScanDiagnostics({ initialId, accessKey }: { initialId?: 
   const diagnostic = result?.diagnostic;
   const settings = result?.summary.settings;
   const isPullback = settings && 'proximity_low_pct' in settings;
-  const units = isPullback ? 'bars' : result?.summary.timeframe === 'daily' ? 'calendar days'
+  const units = result?.summary.lookback_unit === 'candles' || isPullback ? 'candles' : result?.summary.timeframe === 'daily' ? 'calendar days'
     : result?.summary.timeframe === 'weekly' ? 'calendar weeks' : 'calendar months';
   const currency = result && ['NYSE', 'NASDAQ'].includes(result.summary.market) ? 'USD' : 'INR';
   return (

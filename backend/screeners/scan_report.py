@@ -35,6 +35,7 @@ def write_report(directory, screener, config, universe, filename):
     meta = {
         'coverage': coverage, 'settings': config, 'universe': universe,
         'market': screener.market, 'timeframe': screener.timeframe, 'csv_file': filename,
+        'lookback_unit': 'candles',
     }
     (directory / 'summary.json').write_text(json.dumps(meta), encoding='utf-8')
     # One small file per prefix keeps a single-symbol lookup cheap.
@@ -76,10 +77,7 @@ def notify(screener, logic, coverage, scan_id, token, chat_id):
     lines = [header]
     for period in screener.anchor_periods:
         if period in groups:
-            unit = {'daily': 'days', 'weekly': 'weeks', 'monthly': 'months'}[screener.timeframe]
-            if logic == 'pullback':
-                unit = 'bars'
-            lines.extend(f'{period} {unit} · {chunk}' for chunk in ticker_chunks(sorted(groups[period])))
+            lines.extend(f'{period} candles · {chunk}' for chunk in ticker_chunks(sorted(groups[period])))
     print('Telegram summary:', send_telegram_message('\n'.join(lines), token, chat_id, plain=True))
     for chunk in ticker_chunks(symbols):
         print('Telegram TradingView:', send_telegram_message(chunk, token, chat_id, plain=True))

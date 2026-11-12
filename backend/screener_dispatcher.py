@@ -9,7 +9,6 @@ import os
 import sys
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
-from dataclasses import replace
 from time import monotonic
 import re
 import argparse
@@ -20,7 +19,7 @@ if str(BASE_DIR) not in sys.path:
 
 from screeners.breakout_screener import BreakoutScreener
 from screeners.pullback_screener import PullbackScreener
-from screeners.data_fetcher import FETCH_INSUFFICIENT_HISTORY, FetchStatus, fetch_history_batch, get_history_window
+from screeners.data_fetcher import fetch_history_batch
 from screeners.scan_report import notify, write_report
 
 
@@ -121,7 +120,7 @@ def scheduled_params(timeframe, logic, date):
     return {**SCHEDULE_DEFAULTS[logic], **(preset.get('defaults') or {}), **(params or {})}
 
 
-def prepare(logic, timeframe, params, end):
+def prepare(logic, timeframe, params):
     if not isinstance(params, dict):
         raise ValueError('Scan settings must be an object')
     periods = get_anchor_periods(logic, timeframe, params)
@@ -132,8 +131,7 @@ def prepare(logic, timeframe, params, end):
         raise ValueError(f'Choose 1–12 whole-number anchor periods from 1 to {maximum}')
     periods = list(dict.fromkeys(periods))
     config = get_config(logic, timeframe, params)
-    window = get_history_window(timeframe, periods, pullback=logic == 'pullback', end=end)
-    return config, periods, window
+    return config, periods
 
 
 def scan(args):
@@ -147,37 +145,24 @@ def scan(args):
             logic, args.timeframe,
             scheduled_params(args.timeframe, logic, run_date)
             if args.logic == 'scheduled' else json.loads(args.params),
-            end,
         ) for logic in strategies
     }
     stocks, universe = load_stock_list(args.market)
     if not stocks:
         raise ValueError(f'No stocks loaded for {args.market}')
 
-    window = next(iter(setups.values()))[2]
-    window = replace(window, start=min(setup[2].start for setup in setups.values()))
+    required = sorted({period for _, periods in setups.values() for period in periods})
     started = monotonic()
-    histories, statuses = fetch_history_batch(stocks, args.timeframe, [1], window=window)
+    histories, statuses = fetch_history_batch(stocks, args.timeframe, required)
     print(f'History download took {monotonic() - started:.1f}s · {len(histories)}/{len(stocks)} symbols')
 
-    for logic, (config, periods, strategy_window) in setups.items():
+    for logic, (config, periods) in setups.items():
         run_id = f'{args.job_id}-{logic}' if args.logic == 'scheduled' else args.job_id
         directory = BASE_DIR / 'results' / 'runs' / run_id
         directory.mkdir(parents=True, exist_ok=True)
         screener = STRATEGIES[logic](stocks, args.market, args.timeframe, periods, config)
 
-        # Each strategy sees its own history window even when the download is shared.
-        eligible = {}
-        for symbol, frame in histories.items():
-            start = strategy_window.start.date().isoformat()
-            sliced = frame.loc[start:] if strategy_window.start > window.start else frame
-            if len(sliced) >= 10:
-                eligible[symbol] = sliced
-        strategy_statuses = {
-            **statuses,
-            **{symbol: FetchStatus(FETCH_INSUFFICIENT_HISTORY) for symbol in histories if symbol not in eligible},
-        }
-        df = screener.run((eligible, strategy_statuses))
+        df = screener.run((histories, statuses))
         filename = f'{args.market.lower()}_{logic}_{args.timeframe}_{end.strftime("%d%b%Y").lower()}.csv'
         df.to_csv(directory / filename, index=False)
         coverage = write_report(directory, screener, {**config, 'anchor_periods': periods}, universe, filename)

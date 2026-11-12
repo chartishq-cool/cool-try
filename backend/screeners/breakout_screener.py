@@ -4,8 +4,7 @@ Fully parameterized — timeframe, tolerances, ceilings all passed at runtime.
 """
 
 import pandas as pd
-from datetime import datetime, timedelta
-from dateutil.relativedelta import relativedelta
+from datetime import datetime
 
 from screeners.avwap_engine import calculate_avwap
 from screeners.output_formatter import to_tv, format_date
@@ -144,34 +143,14 @@ class BreakoutScreener:
         results = []
         hits = []
         periods = self.diagnostics.setdefault(symbol, {'periods': {}})['periods']
-        end_date = datetime.now().date()
 
         for period in self.anchor_periods:
             check = periods[period] = {'status': 'insufficient_history'}
             try:
-                if self.timeframe == 'daily':
-                    anchor_date = end_date - timedelta(days=period)
-                elif self.timeframe == 'weekly':
-                    anchor_date = end_date - timedelta(weeks=period)
-                elif self.timeframe == 'monthly':
-                    anchor_date = end_date - relativedelta(months=period)
-                else:
+                if len(data) < period:
                     continue
 
-                ts = pd.Timestamp(anchor_date)
-                if data.index.tz is not None:
-                    ts = ts.tz_localize(data.index.tz)
-
-                if ts < data.index[0]:
-                    continue
-
-                earlier = data.index[data.index <= ts]
-                closest = earlier[-1] if len(earlier) > 0 else data.index[0]
-                df_anchor = data.loc[closest:]
-
-                if df_anchor.empty:
-                    continue
-
+                df_anchor = data.tail(period)
                 hh_date = df_anchor['High'].idxmax()
 
                 # avwap_series is now a named pandas Series (name='AVWAP').

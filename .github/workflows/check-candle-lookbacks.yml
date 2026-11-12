@@ -1,0 +1,56 @@
+name: Check candle lookbacks
+
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/check-candle-lookbacks.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  anchors:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r backend/requirements.txt
+      - name: Check anchor selection and incomplete history
+        working-directory: backend
+        run: |
+          python -m compileall -q .
+          python - <<'PY'
+          from datetime import datetime
+          from unittest.mock import patch
+
+          import pandas as pd
+
+          from screeners import breakout_screener, pullback_screener
+          from screeners.data_fetcher import get_history_window
+
+          end = datetime(2026, 11, 12)
+          assert (end - get_history_window('daily', [900], end=end).start).days == 1900
+
+          for timeframe, frequency in [('daily', 'B'), ('weekly', 'W'), ('monthly', pd.offsets.MonthEnd())]:
+              dates = pd.date_range(end='2026-11-11', periods=12, freq=frequency)
+              data = pd.DataFrame({
+                  'High': [1000] + list(range(11)),
+                  'Low': [-1000] + list(range(11)),
+                  'Close': 30,
+                  'Volume': 500,
+              }, index=dates)
+              cases = [
+                  (breakout_screener, breakout_screener.BreakoutScreener, 'calculate_avwap', dates[-1]),
+                  (pullback_screener, pullback_screener.PullbackScreener, 'calculate_avwap_low', dates[-5]),
+              ]
+              for module, scanner_type, function, anchor in cases:
+                  scanner = scanner_type(['TEST.NS'], 'NSE', timeframe, [5, 13], {'min_periods_old': 2})
+                  with patch.object(module, function, return_value=None) as calculate:
+                      scanner._screen_stock('TEST.NS', data)
+                      assert calculate.call_count == 1
+                      assert calculate.call_args.kwargs['anchor_date'] == anchor, timeframe
+                      assert scanner.diagnostics['TEST.NS']['periods'][13]['status'] == 'insufficient_history'
+          PY
