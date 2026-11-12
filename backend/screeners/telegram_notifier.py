@@ -5,9 +5,10 @@ Formats messages for both breakout and pullback results.
 
 import requests
 from datetime import datetime
+from textwrap import wrap
 
 
-def send_telegram_message(message, bot_token, chat_id, *, plain=False):
+def send_telegram_message(message, bot_token, chat_id):
     try:
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         
@@ -15,7 +16,10 @@ def send_telegram_message(message, bot_token, chat_id, *, plain=False):
         MAX_LEN = 4000  # safe margin below 4096
         chunks = []
         current = ""
-        for line in message.split("\n"):
+        lines = (part for line in message.split("\n")
+                 for part in (wrap(line, width=MAX_LEN - 1, break_on_hyphens=False)
+                              if len(line) >= MAX_LEN else [line]))
+        for line in lines:
             addition = (line + "\n")
             if len(current) + len(addition) > MAX_LEN:
                 chunks.append(current.rstrip())
@@ -31,7 +35,7 @@ def send_telegram_message(message, bot_token, chat_id, *, plain=False):
                 json={
                     "chat_id": chat_id,
                     "text": chunk,
-                    **({} if plain else {"parse_mode": "Markdown"}),
+                    "parse_mode": "Markdown",
                     "disable_web_page_preview": True,
                 },
                 timeout=10,

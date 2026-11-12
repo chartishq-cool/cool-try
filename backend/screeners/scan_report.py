@@ -3,9 +3,6 @@ import json
 import math
 from collections import defaultdict
 
-from screeners.output_formatter import to_tv
-from screeners.telegram_notifier import send_telegram_message
-
 
 def clean_numbers(value):
     if isinstance(value, dict):
@@ -47,37 +44,3 @@ def write_report(directory, screener, config, universe, filename):
             json.dumps(bucket, separators=(',', ':'), allow_nan=False), encoding='utf-8'
         )
     return coverage
-
-
-def ticker_chunks(symbols, limit=3700):
-    chunk = []
-    size = 0
-    for symbol in symbols:
-        if chunk and size + len(symbol) + 1 > limit:
-            yield ','.join(chunk)
-            chunk, size = [], 0
-        size += len(symbol) + bool(chunk)
-        chunk.append(symbol)
-    if chunk:
-        yield ','.join(chunk)
-
-
-def notify(screener, logic, coverage, scan_id, token, chat_id):
-    suffix = screener.market_suffix
-    groups = defaultdict(list)
-    for symbol, item in screener.diagnostics.items():
-        tv = to_tv(symbol.removesuffix(suffix) if suffix else symbol, suffix, screener.market)
-        for period, check in item.get('periods', {}).items():
-            if check['status'] == 'passed':
-                groups[period].append(tv)
-    symbols = sorted({symbol for group in groups.values() for symbol in group})
-    header = (f'{screener.market} {screener.timeframe.title()} {logic.title()} · {scan_id}\n'
-              f'{len(symbols)} matches · {coverage["evaluated"]}/{coverage["requested"]} evaluated'
-              f' · {coverage["incomplete_checks"]} with incomplete lookbacks')
-    lines = [header]
-    for period in screener.anchor_periods:
-        if period in groups:
-            lines.extend(f'{period} candles · {chunk}' for chunk in ticker_chunks(sorted(groups[period])))
-    print('Telegram summary:', send_telegram_message('\n'.join(lines), token, chat_id, plain=True))
-    for chunk in ticker_chunks(symbols):
-        print('Telegram TradingView:', send_telegram_message(chunk, token, chat_id, plain=True))

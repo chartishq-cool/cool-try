@@ -20,7 +20,12 @@ if str(BASE_DIR) not in sys.path:
 from screeners.breakout_screener import BreakoutScreener
 from screeners.pullback_screener import PullbackScreener
 from screeners.data_fetcher import fetch_history_batch
-from screeners.scan_report import notify, write_report
+from screeners.scan_report import write_report
+from screeners.telegram_notifier import (
+    build_breakout_telegram_message,
+    build_pullback_telegram_message,
+    send_telegram_message,
+)
 
 
 def load_stock_list(market):
@@ -168,7 +173,14 @@ def scan(args):
         coverage = write_report(directory, screener, {**config, 'anchor_periods': periods}, universe, filename)
         print(f'{run_id} · {coverage}')
         if args.telegram_token and args.telegram_chat_id:
-            notify(screener, logic, coverage, run_id, args.telegram_token, args.telegram_chat_id)
+            formatter = (
+                build_breakout_telegram_message if logic == 'breakout'
+                else build_pullback_telegram_message
+            )
+            message = formatter(df, periods, config, args.market)
+            title, separator, details = message.partition('\n')
+            message = f"{title}\nScan ID: `{run_id}`{separator}{details}"
+            print('Telegram:', send_telegram_message(message, args.telegram_token, args.telegram_chat_id))
 
 
 def main():
