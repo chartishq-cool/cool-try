@@ -1135,7 +1135,14 @@ const downloadCsv = async (downloadUrl?: string, filename?: string) => {
                 </div>
               ) : (
                 <div style={styles.panel}>
-                  <div style={styles.noResults}>No symbols matched the selected parameters.</div>
+                  <div style={styles.noResults}>
+                    {results.summary?.coverage.evaluated === 0
+                      ? 'No tickers could be evaluated. Check scan coverage above.'
+                      : results.summary && (results.summary.coverage.skipped > 0 || results.summary.coverage.incomplete_checks > 0)
+                        ? 'No matches among the tickers and lookbacks that could be checked.'
+                        : 'No symbols matched the selected parameters.'}
+                  </div>
+                  {results.downloadUrl && <button style={styles.actionButton} onClick={() => downloadCsv(results.downloadUrl, results.csvFile)}>Download CSV</button>}
                 </div>
               )}
             </div>

@@ -22,7 +22,7 @@ MINIMUM = {'NSE': 1000, 'BSE': 2000, 'NASDAQ': 2000, 'NYSE': 1000}
 def load_symbols(market, response):
     unmapped = set()
     if market == 'BSE':
-        rows = response.json()
+        rows = [{key.lower(): value for key, value in row.items()} for row in response.json()]
         symbols = [row['scrip_id'] for row in rows]
     else:
         text = response.content.decode('utf-8-sig')

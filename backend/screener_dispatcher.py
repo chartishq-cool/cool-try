@@ -20,7 +20,7 @@ if str(BASE_DIR) not in sys.path:
 
 from screeners.breakout_screener import BreakoutScreener
 from screeners.pullback_screener import PullbackScreener
-from screeners.data_fetcher import FETCH_NO_DATA, FetchStatus, fetch_history_batch, get_history_window
+from screeners.data_fetcher import FETCH_INSUFFICIENT_HISTORY, FetchStatus, fetch_history_batch, get_history_window
 from screeners.scan_report import notify, write_report
 
 
@@ -175,7 +175,7 @@ def scan(args):
                 eligible[symbol] = sliced
         strategy_statuses = {
             **statuses,
-            **{symbol: FetchStatus(FETCH_NO_DATA) for symbol in histories if symbol not in eligible},
+            **{symbol: FetchStatus(FETCH_INSUFFICIENT_HISTORY) for symbol in histories if symbol not in eligible},
         }
         df = screener.run((eligible, strategy_statuses))
         filename = f'{args.market.lower()}_{logic}_{args.timeframe}_{end.strftime("%d%b%Y").lower()}.csv'

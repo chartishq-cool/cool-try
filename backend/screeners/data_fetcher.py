@@ -24,6 +24,7 @@ import yfinance as yf
 REQUIRED_COLUMNS = ['High', 'Low', 'Close', 'Volume']
 FETCH_OK = 'ok'
 FETCH_NO_DATA = 'no_data'
+FETCH_INSUFFICIENT_HISTORY = 'insufficient_history'
 FETCH_ERROR = 'fetch_error'
 FETCH_RATE_LIMITED = 'rate_limited'
 
@@ -63,14 +64,14 @@ def get_history_window(timeframe, anchor_periods, *, pullback=False, end=None):
 
 
 def _clean_history(data):
-    if data is None or data.empty or len(data) < 10:
+    if data is None or data.empty:
         return None
 
     if not all(c in data.columns for c in REQUIRED_COLUMNS):
         return None
 
     cleaned = data[data['Volume'] > 0]
-    if cleaned.empty or len(cleaned) < 10:
+    if cleaned.empty:
         return None
 
     return cleaned
@@ -207,7 +208,12 @@ def fetch_history_batch(
                 if data is None:
                     statuses[symbol] = FetchStatus(
                         status=FETCH_NO_DATA,
-                        message='empty/insufficient OHLCV data for symbol',
+                        message='no usable OHLCV data for symbol',
+                    )
+                elif len(data) < 10:
+                    statuses[symbol] = FetchStatus(
+                        status=FETCH_INSUFFICIENT_HISTORY,
+                        message=f'only {len(data)} usable candles; minimum is 10',
                     )
                 else:
                     histories[symbol] = data

@@ -6,7 +6,7 @@ const labels: Record<string, string> = {
   passed: 'Matched',
   not_in_universe: 'Ticker was outside this scan’s stock list',
   wrong_market: 'Ticker belongs to a different market',
-  no_data: 'Yahoo returned missing or insufficient price data',
+  no_data: 'Yahoo returned no usable price data',
   fetch_error: 'Price download failed',
   rate_limited: 'Price download may have been throttled',
   insufficient_history: 'Insufficient history for this lookback',
