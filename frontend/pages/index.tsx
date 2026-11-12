@@ -1,7 +1,11 @@
 import { useState, CSSProperties, useEffect, useRef } from 'react';
 import axios from 'axios';
+import ScanDiagnostics, { Coverage } from '../components/ScanDiagnostics';
+import type { ScanSummary } from '../lib/scan-results';
 
 interface ScanResults {
+  jobId?: string;
+  summary?: ScanSummary;
   total: number;
   pure?: number;
   retry?: number;
@@ -613,8 +617,8 @@ export default function Home() {
   const [logic, setLogic]                             = useState('breakout');
   const [timeframe, setTimeframe]                     = useState('daily');
   const [anchorPeriods, setAnchorPeriods]             = useState(DEFAULT_ANCHORS['daily']);
-  const [toleranceBelowAvwap, setToleranceBelowAvwap] = useState('0.03');
-  const [ceiling, setCeiling]                         = useState('0.07');
+  const [toleranceBelowAvwap, setToleranceBelowAvwap] = useState('3');
+  const [ceiling, setCeiling]                         = useState('7');
   const [sustainPeriods, setSustainPeriods]           = useState('3');
   const [maxFailedAttempts, setMaxFailedAttempts]     = useState('0');
   const [minTurnover, setMinTurnover]                 = useState('5000000');
@@ -624,6 +628,12 @@ export default function Home() {
   const [minPeriodsOld, setMinPeriodsOld]             = useState('20');
 
   // ── UI state (unchanged) ───────────────────────────────────────────────────
+  const [accessKey, setAccessKey] = useState('');
+  const [presetDate, setPresetDate] = useState('');
+  const [presetStatus, setPresetStatus] = useState('');
+  const [presetBusy, setPresetBusy] = useState(false);
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (pollTimer.current) clearTimeout(pollTimer.current); }, []);
   const [loading, setLoading]     = useState(false);
   const [results, setResults]     = useState<ScanResults | null>(null);
   const [error, setError]         = useState<string | null>(null);
@@ -659,6 +669,59 @@ useEffect(() => {
   };
 
   // ── Scan logic (unchanged) ─────────────────────────────────────────────────
+  const number = (value: string) => value.trim() === '' ? NaN : Number(value);
+  const scanParams = () => {
+    const base = { min_turnover: number(minTurnover), anchor_periods: anchorPeriods.split(',').map(number) };
+    return logic === 'breakout' ? {
+      ...base, tolerance_below_avwap: number(toleranceBelowAvwap) / 100, ceiling: number(ceiling) / 100,
+      sustain_periods: number(sustainPeriods), max_failed_attempts: number(maxFailedAttempts),
+    } : {
+      ...base, proximity_low_pct: number(proximityLowPct), proximity_high_pct: number(proximityHighPct),
+      max_brief_crosses: number(maxBriefCrosses), min_periods_old: number(minPeriodsOld),
+    };
+  };
+
+  const presetAction = async (mode: 'load' | 'load-override' | 'default' | 'override' | 'clear') => {
+    setPresetBusy(true);
+    setPresetStatus('');
+    const headers = { 'x-argus-key': accessKey };
+    try {
+      const url = '/api/schedule-presets';
+      const reading = mode === 'load' || mode === 'load-override';
+      const { data } = reading
+        ? await axios.get(url, { params: { logic, timeframe }, headers })
+        : await axios.put(url, { logic, timeframe, mode, date: presetDate, params: scanParams() }, { headers });
+      if (reading) {
+        if (mode === 'load-override' && !data.override) {
+          setPresetStatus('No dated override is saved for this preset.');
+          return;
+        }
+        const config = mode === 'load-override' ? { ...data.defaults, ...data.override.params } : data.defaults;
+        setMinTurnover(String(config.min_turnover));
+        setAnchorPeriods(config.anchor_periods.join(', '));
+        if (logic === 'breakout') {
+          setToleranceBelowAvwap(String(Number((config.tolerance_below_avwap * 100).toFixed(8))));
+          setCeiling(String(Number((config.ceiling * 100).toFixed(8))));
+          setSustainPeriods(String(config.sustain_periods));
+          setMaxFailedAttempts(String(config.max_failed_attempts));
+        } else {
+          setProximityLowPct(String(config.proximity_low_pct));
+          setProximityHighPct(String(config.proximity_high_pct));
+          setMaxBriefCrosses(String(config.max_brief_crosses));
+          setMinPeriodsOld(String(config.min_periods_old));
+        }
+        setPresetDate(data.override?.date ?? '');
+      }
+      const message = reading ? 'Preset loaded into the scan form.' :
+        mode === 'clear' ? 'Dated override cleared.' : 'Scheduled settings saved.';
+      setPresetStatus(message + (data.override ? ` Override date: ${data.override.date} IST.` : ''));
+    } catch (err) {
+      setPresetStatus(axios.isAxiosError(err) ? err.response?.data?.error ?? 'Could not update preset.' : 'Could not update preset.');
+    } finally {
+      setPresetBusy(false);
+    }
+  };
+
   const handleRunScan = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -667,31 +730,7 @@ useEffect(() => {
     setPollCount(0);
 
     try {
-      const periods = anchorPeriods
-        .split(',')
-        .map(p => parseInt(p.trim()))
-        .filter(p => !isNaN(p));
-
-      const baseParams = { min_turnover: parseInt(minTurnover) };
-      const params = logic === 'breakout'
-        ? {
-            ...baseParams,
-            tolerance_below_avwap: parseFloat(toleranceBelowAvwap),
-            ceiling: parseFloat(ceiling),
-            sustain_periods: parseInt(sustainPeriods),
-            max_failed_attempts: parseInt(maxFailedAttempts),
-            anchor_periods: periods,
-          }
-        : {
-            ...baseParams,
-            proximity_low_pct: parseFloat(proximityLowPct),
-            proximity_high_pct: parseFloat(proximityHighPct),
-            max_brief_crosses: parseInt(maxBriefCrosses),
-            min_periods_old: parseInt(minPeriodsOld),
-            anchor_periods: periods,
-          };
-
-      const response = await axios.post('/api/trigger-scan', { market, logic, timeframe, params });
+      const response = await axios.post('/api/trigger-scan', { market, logic, timeframe, params: scanParams() }, { headers: { 'x-argus-key': accessKey } });
       pollForResults(response.data.jobId);
     } catch (err: unknown) {
       setError(
@@ -705,45 +744,40 @@ useEffect(() => {
 
   const pollForResults = (id: string) => {
     let count = 0;
-    const interval = setInterval(async () => {
-      count += 1;
-      setPollCount(count);
+    const deadline = Date.now() + 30 * 60 * 1000;
+    const poll = async () => {
+      setPollCount(++count);
       try {
-        const res = await axios.get('/api/scan-status', {
-          params: { jobId: id, market, logic, timeframe },
+        const { data } = await axios.get('/api/scan-status', {
+          params: { jobId: id }, headers: { 'x-argus-key': accessKey },
         });
-        if (res.data.status === 'completed') {
-          clearInterval(interval);
-          const finalResults = res.data.results
-            ? { ...res.data.results, csvFile: res.data.csvFile, downloadUrl: res.data.downloadUrl }
-            : null;
-          setResults(finalResults);
-          // Persist results so they survive page refresh
-          if (finalResults) {
-            saveLastScan(finalResults, market, logic, timeframe);
-          }
+        if (data.status === 'completed') {
+          const completed = { ...data.results, jobId: id, summary: data.summary, csvFile: data.csvFile, downloadUrl: data.downloadUrl };
+          setResults(completed);
+          saveLastScan(completed, market, logic, timeframe);
           setLoading(false);
-        } else if (res.data.status === 'failed') {
-          clearInterval(interval);
-          setError(res.data.error || 'Scan failed');
-          setLoading(false);
-        } else if (count > 180) {
-          clearInterval(interval);
-          setError('Scan timed out after 15 minutes');
-          setLoading(false);
+          return;
         }
-      } catch (err: unknown) {
-        if (axios.isAxiosError(err) && err.response?.data?.error) {
-          clearInterval(interval);
-          setError(err.response.data.error);
+        if (data.status === 'failed') {
+          setError(data.error || 'Scan failed');
           setLoading(false);
-        } else if (count > 60) {
-          clearInterval(interval);
-          setError('Scan timed out');
+          return;
+        }
+      } catch (err) {
+        if (axios.isAxiosError(err) && [400, 401, 404, 503].includes(err.response?.status ?? 0)) {
+          setError(err.response?.data?.error ?? 'Could not check scan status.');
           setLoading(false);
+          return;
         }
       }
-    }, 5000);
+      if (Date.now() >= deadline) {
+        setError(`Stopped waiting for scan ${id}. Check the run in GitHub Actions.`);
+        setLoading(false);
+        return;
+      }
+      pollTimer.current = setTimeout(poll, 5000);
+    };
+    pollTimer.current = setTimeout(poll, 5000);
   };
 
   const copySymbols = (symbols: string[]) => {
@@ -758,7 +792,10 @@ const downloadCsv = async (downloadUrl?: string, filename?: string) => {
       return;
     }
     try {
-      const res = await axios.get<string>(downloadUrl, { responseType: 'text' });
+      const res = await axios.get<string>(downloadUrl, {
+        responseType: 'text',
+        headers: downloadUrl.startsWith('/api/') ? { 'x-argus-key': accessKey } : undefined,
+      });
       const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -859,7 +896,7 @@ const downloadCsv = async (downloadUrl?: string, filename?: string) => {
 
             {/* Anchor Periods */}
             <ParamInput
-              label="Anchor Periods"
+              label={logic === 'pullback' ? 'Anchor Lookbacks (candles)' : `Anchor Lookbacks (${timeframe === 'daily' ? 'days' : timeframe === 'weekly' ? 'weeks' : 'months'})`}
               value={anchorPeriods}
               onChange={setAnchorPeriods}
               placeholder="e.g. 52,156,260"
@@ -869,7 +906,7 @@ const downloadCsv = async (downloadUrl?: string, filename?: string) => {
 
             {/* Min Turnover */}
             <ParamInput
-              label="Min Turnover (₹)"
+              label={market === 'NSE' || market === 'BSE' ? 'Min Turnover (₹)' : 'Min Turnover (USD)'}
               value={minTurnover}
               onChange={setMinTurnover}
               type="number"
@@ -880,7 +917,7 @@ const downloadCsv = async (downloadUrl?: string, filename?: string) => {
             <div style={{ marginLeft: 'auto', paddingLeft: '20px' }}>
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || presetBusy}
                 style={{
                   ...styles.runButtonBar,
                   ...(loading ? styles.runButtonBarLoading : {}),
@@ -918,11 +955,11 @@ const downloadCsv = async (downloadUrl?: string, filename?: string) => {
           <div style={styles.paramsRow2}>
             {logic === 'breakout' ? (
               <>
-                <ParamInput label="Tol. Below AVWAP" value={toleranceBelowAvwap} onChange={setToleranceBelowAvwap} type="number" step="0.01" narrow />
+                <ParamInput label="Tolerance Below AVWAP (%)" value={toleranceBelowAvwap} onChange={setToleranceBelowAvwap} type="number" step="0.01" narrow />
                 <div style={styles.paramDivider} />
-                <ParamInput label="Ceiling Above AVWAP" value={ceiling} onChange={setCeiling} type="number" step="0.01" narrow />
+                <ParamInput label="Ceiling Above AVWAP (%)" value={ceiling} onChange={setCeiling} type="number" step="0.01" narrow />
                 <div style={styles.paramDivider} />
-                <ParamInput label="Sustain Periods" value={sustainPeriods} onChange={setSustainPeriods} type="number" narrow />
+                <ParamInput label="Sustain (candles)" value={sustainPeriods} onChange={setSustainPeriods} type="number" narrow />
                 <div style={styles.paramDivider} />
                 <ParamInput label="Max Failed Attempts" value={maxFailedAttempts} onChange={setMaxFailedAttempts} type="number" narrow />
               </>
@@ -934,17 +971,45 @@ const downloadCsv = async (downloadUrl?: string, filename?: string) => {
                 <div style={styles.paramDivider} />
                 <ParamInput label="Max Brief Crosses" value={maxBriefCrosses} onChange={setMaxBriefCrosses} type="number" narrow />
                 <div style={styles.paramDivider} />
-                <ParamInput label="Min Periods Old" value={minPeriodsOld} onChange={setMinPeriodsOld} type="number" narrow />
+                <ParamInput label="Minimum Anchor Age (candles)" value={minPeriodsOld} onChange={setMinPeriodsOld} type="number" narrow />
               </>
             )}
           </div>
 
+          <div style={styles.paramsRow2}>
+            <label>ARGUS access key <input type="password" autoComplete="current-password" value={accessKey}
+              onChange={(e) => setAccessKey(e.target.value)} disabled={loading || presetBusy} /></label>
+            <small>{logic === 'breakout'
+              ? 'Calendar lookbacks. Tolerance applies after the sustain candles.'
+              : 'Candle lookbacks. A cross counts one stretch below AVWAP, regardless of length.'} Turnover uses the latest candle.</small>
+          </div>
         </form>
       </div>
 
       {/* ── Results pane: scrolls independently ─────────────────────────────── */}
       <main style={styles.resultsPane}>
         <div style={styles.resultsPaneInner}>
+          {market === 'NSE' && timeframe !== 'monthly' && (
+            <details style={{ margin: '12px 0' }}>
+              <summary>Scheduled NSE settings · {timeframe} {logic}</summary>
+              <p>Load the saved settings into the scan form, then edit the fields above. Save them as the recurring default or choose one weekday for an override.</p>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <button type="button" disabled={loading || presetBusy} onClick={() => presetAction('load')}>Load default</button>
+                <button type="button" disabled={loading || presetBusy} onClick={() => presetAction('default')}>Save as default</button>
+                <label>Override date (IST) <input type="date" value={presetDate} onChange={(e) => setPresetDate(e.target.value)} /></label>
+                <button type="button" disabled={loading || presetBusy || !presetDate} onClick={() => presetAction('override')}>Save dated override</button>
+                <button type="button" disabled={loading || presetBusy} onClick={() => presetAction('load-override')}>Load override</button>
+                <button type="button" disabled={loading || presetBusy} onClick={() => presetAction('clear')}>Clear override</button>
+              </div>
+              {presetStatus && <p role="status">{presetStatus}</p>}
+            </details>
+          )}
+          {results?.jobId && <div>Scan ID <code>{results.jobId}</code></div>}
+          {results?.summary && <Coverage summary={results.summary} />}
+          <details style={{ margin: '12px 0' }}>
+            <summary>Why did this stock miss?</summary>
+            <ScanDiagnostics key={results?.jobId ?? 'lookup'} initialId={results?.jobId} accessKey={accessKey} />
+          </details>
 
           {/* Error */}
           {error && (
@@ -1070,7 +1135,14 @@ const downloadCsv = async (downloadUrl?: string, filename?: string) => {
                 </div>
               ) : (
                 <div style={styles.panel}>
-                  <div style={styles.noResults}>No symbols matched the selected parameters.</div>
+                  <div style={styles.noResults}>
+                    {results.summary?.coverage.evaluated === 0
+                      ? 'No tickers could be evaluated. Check scan coverage above.'
+                      : results.summary && (results.summary.coverage.skipped > 0 || results.summary.coverage.incomplete_checks > 0)
+                        ? 'No matches among the tickers and lookbacks that could be checked.'
+                        : 'No symbols matched the selected parameters.'}
+                  </div>
+                  {results.downloadUrl && <button style={styles.actionButton} onClick={() => downloadCsv(results.downloadUrl, results.csvFile)}>Download CSV</button>}
                 </div>
               )}
             </div>

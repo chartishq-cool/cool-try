@@ -7,7 +7,7 @@ import requests
 from datetime import datetime
 
 
-def send_telegram_message(message, bot_token, chat_id):
+def send_telegram_message(message, bot_token, chat_id, *, plain=False):
     try:
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         
@@ -31,7 +31,7 @@ def send_telegram_message(message, bot_token, chat_id):
                 json={
                     "chat_id": chat_id,
                     "text": chunk,
-                    "parse_mode": "Markdown",
+                    **({} if plain else {"parse_mode": "Markdown"}),
                     "disable_web_page_preview": True,
                 },
                 timeout=10,
@@ -43,7 +43,7 @@ def send_telegram_message(message, bot_token, chat_id):
         return "OK"
 
     except Exception as e:
-        return f"Error: {e}"
+        return f"Error: {type(e).__name__}"
 
 
 def build_breakout_telegram_message(df_results, anchor_periods, config, market='NSE'):

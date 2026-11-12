@@ -1,35 +1,11 @@
 import axios from 'axios';
+import { requireScanAccess } from '../../lib/scan-access';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getGitHubAuthHeaders, getGitHubConfig, getGitHubErrorMessage } from '../../lib/github';
+import { ScanSummary, scanFile, validScanId } from '../../lib/scan-results';
 
-type ScanResults = {
-    total: number;
-    pure?: number;
-    retry?: number;
-    symbols: string[];
-};
-
-type ScanStatusResponse = {
-  status: 'pending' | 'completed' | 'failed';
-  message?: string;
-  success?: boolean;
-  csvFile?: string;
-  downloadUrl?: string;
-  results?: ScanResults;
-  error?: string;
-};
-
-type GitHubWorkflowRun = {
-  status: string;
-  conclusion: string | null;
-  created_at: string;
-};
-
-type GitHubContentFile = {
-  name: string;
-  download_url: string | null;
-  type: string;
-};
+type ScanResults = { total: number; pure?: number; retry?: number; symbols: string[] };
+type WorkflowRun = { status: string; conclusion: string | null; display_title: string; html_url: string };
 
 function parseCsvLine(line: string): string[] {
   const result: string[] = [];
@@ -123,174 +99,53 @@ const dedupedRows = Array.from(symbolRowMap.values());
     };
 }
 
-function parseDateFromFilename(name: string): Date {
-  const match = name.match(
-    /(\d{2})(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)(\d{4})/i
-  );
 
-  if (!match) {
-    return new Date(0);
-  }
-
-  const months: Record<string, number> = {
-    jan: 0,
-    feb: 1,
-    mar: 2,
-    apr: 3,
-    may: 4,
-    jun: 5,
-    jul: 6,
-    aug: 7,
-    sep: 8,
-    oct: 9,
-    nov: 10,
-    dec: 11,
-  };
-
-  return new Date(
-    Number.parseInt(match[3], 10),
-    months[match[2].toLowerCase()],
-    Number.parseInt(match[1], 10)
-  );
-}
-
-function getJobStartedAt(jobId: string): Date | undefined {
-  const timestamp = Number.parseInt(jobId.split('-')[0] ?? '', 10);
-
-  if (Number.isNaN(timestamp)) {
-    return undefined;
-  }
-
-  return new Date(timestamp);
-}
-
-function getStringQueryParam(value: string | string[] | undefined): string | undefined {
-  return typeof value === 'string' ? value : undefined;
-}
-
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse<ScanStatusResponse>
-) {
-  if (req.method !== 'GET') {
-    return res.status(405).json({ status: 'failed', error: 'Method not allowed' });
-  }
-
-  const jobId = getStringQueryParam(req.query.jobId);
-
-  if (!jobId) {
-    return res.status(400).json({ status: 'failed', error: 'Missing jobId' });
-  }
-
-  const marketFilter = getStringQueryParam(req.query.market)?.toLowerCase();
-  const logicFilter = getStringQueryParam(req.query.logic)?.toLowerCase();
-  const timeframeFilter = getStringQueryParam(req.query.timeframe)?.toLowerCase();
-  const githubConfig = getGitHubConfig();
-
-  if (githubConfig.error || !githubConfig.token || !githubConfig.repo) {
-    return res.status(500).json({ status: 'failed', error: githubConfig.error });
-  }
-
-  const { token: githubToken, repo: githubRepo } = githubConfig;
-  const authHeaders = getGitHubAuthHeaders(githubToken);
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  res.setHeader('Cache-Control', 'no-store');
+  if (req.method !== 'GET') return res.status(405).end();
+  if (!requireScanAccess(req, res)) return;
+  const { jobId, download } = req.query;
+  if (!validScanId(jobId)) return res.status(400).json({ status: 'failed', error: 'Invalid scan ID' });
+  const { token, repo, error } = getGitHubConfig();
+  if (!token || !repo || error) return res.status(503).json({ status: 'failed', error });
 
   try {
-    const workflowResponse = await axios.get<{ workflow_runs?: GitHubWorkflowRun[] }>(
-      `https://api.github.com/repos/${githubRepo}/actions/workflows/screener.yml/runs`,
-      {
-        headers: authHeaders,
-        params: { event: 'repository_dispatch', per_page: 10 },
+    if (download !== '1') {
+      const time = Number(jobId.split('-')[0]);
+      if (!/^\d{13}-/.test(jobId) || !Number.isFinite(time)) {
+        return res.status(400).json({ status: 'failed', error: 'Invalid manual scan ID' });
       }
-    );
-
-    const jobStartedAt = getJobStartedAt(jobId);
-    const matchingRuns = (workflowResponse.data.workflow_runs ?? []).filter((run) => {
-      if (!jobStartedAt) {
-        return true;
-      }
-
-      return new Date(run.created_at).getTime() >= jobStartedAt.getTime();
-    });
-
-    if (matchingRuns.length === 0) {
-      return res.status(200).json({
-        status: 'pending',
-        message: 'Waiting for workflow to start',
-      });
-    }
-
-    const latestRun = matchingRuns[0];
-
-    if (latestRun.status !== 'completed') {
-      return res.status(200).json({
-        status: 'pending',
-        message: 'Scan in progress...',
-      });
-    }
-
-    if (latestRun.conclusion !== 'success') {
-      return res.status(200).json({
-        status: 'failed',
-        error: `Workflow failed with conclusion: ${latestRun.conclusion ?? 'unknown'}`,
-      });
-    }
-
-    try {
-      const contentsResponse = await axios.get<GitHubContentFile[]>(
-        `https://api.github.com/repos/${githubRepo}/contents/backend/results`,
-        { headers: authHeaders }
+      const created = new Date(time - 1000).toISOString();
+      const { data } = await axios.get<{ workflow_runs: WorkflowRun[] }>(
+        `https://api.github.com/repos/${repo}/actions/workflows/screener.yml/runs`,
+        { headers: getGitHubAuthHeaders(token), params: { event: 'repository_dispatch', created: `>=${created}`, per_page: 100 }, timeout: 10000 },
       );
-
-      const expectedPrefix =
-        marketFilter && logicFilter && timeframeFilter
-          ? `${marketFilter}_${logicFilter}_${timeframeFilter}_`
-          : undefined;
-
-      const latestFile = contentsResponse.data
-        .filter((file) => file.type === 'file' && file.download_url)
-        .filter((file) => file.name.endsWith('.csv'))
-        .filter((file) => !expectedPrefix || file.name.startsWith(expectedPrefix))
-        .sort(
-          (a, b) =>
-            parseDateFromFilename(b.name).getTime() -
-            parseDateFromFilename(a.name).getTime()
-        )[0];
-
-      if (!latestFile?.download_url) {
-        return res.status(200).json({
-          status: 'completed',
-          success: true,
-          message: 'Scan completed but no matching CSV was found in backend/results.',
-          results: { total: 0, pure: 0, retry: 0, symbols: [] },
-        });
+      const run = data.workflow_runs.find((item) => item.display_title === `ARGUS ${jobId}`);
+      if (!run || run.status !== 'completed') return res.json({ status: 'pending' });
+      if (run.conclusion !== 'success') {
+        return res.json({ status: 'failed', error: `GitHub scan ended with status ${run.conclusion}.`, runUrl: run.html_url });
       }
-
-      const csvResponse = await axios.get<string>(latestFile.download_url, {
-        responseType: 'text',
-      });
-
-      return res.status(200).json({
-        status: 'completed',
-        success: true,
-        csvFile: latestFile.name,
-        downloadUrl: latestFile.download_url,
-        results: parseCsvResults(csvResponse.data),
-      });
-    } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 404) {
-        return res.status(200).json({
-          status: 'completed',
-          success: true,
-          message: 'Scan completed. Results folder not found.',
-          results: { total: 0, pure: 0, retry: 0, symbols: [] },
-        });
-      }
-
-      throw error;
     }
-  } catch (error) {
-    const message = getGitHubErrorMessage(error, githubRepo);
-    console.error('Error checking scan status:', message);
-    return res.status(500).json({ status: 'failed', error: message });
+
+    const meta = await scanFile(repo, token, jobId, 'summary.json');
+    const summary: ScanSummary = JSON.parse(meta.data);
+    if (!/^[a-z0-9_]+\.csv$/.test(summary.csv_file)) throw new Error('Invalid result filename');
+    const csv = await scanFile(repo, token, jobId, summary.csv_file);
+    if (download === '1') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${summary.csv_file}"`);
+      return res.send(csv.data);
+    }
+    return res.json({
+      status: 'completed', csvFile: summary.csv_file,
+      downloadUrl: `/api/scan-status?jobId=${jobId}&download=1`,
+      results: parseCsvResults(csv.data), summary,
+    });
+  } catch (err) {
+    const missing = axios.isAxiosError(err) && err.response?.status === 404;
+    return res.status(missing ? 404 : 502).json({
+      status: 'failed',
+      error: missing ? 'GitHub did not return the workflow or files for this scan.' : getGitHubErrorMessage(err, repo),
+    });
   }
 }

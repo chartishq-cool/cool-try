@@ -15,6 +15,7 @@ from screeners.data_fetcher import (
     FETCH_OK,
     FETCH_RATE_LIMITED,
     fetch_history_batch,
+    get_history_window,
 )
 
 
@@ -27,6 +28,7 @@ class PullbackScreener:
     """
 
     def __init__(self, stocks, market, timeframe, anchor_periods, config):
+        self.diagnostics = {}
         self.stocks = stocks
         self.market = market
         self.timeframe = timeframe
@@ -71,7 +73,7 @@ class PullbackScreener:
             return "No data"
         return "No data"
 
-    def _check_criteria(self, data, anchor_idx, avwap_series):
+    def _check_criteria(self, data, anchor_idx, avwap_series, check):
         """
         Check if stock meets pullback criteria.
 
@@ -92,6 +94,7 @@ class PullbackScreener:
             post_avwap = avwap_series.iloc[1:]
 
             if post_data.empty:
+                check['status'] = 'no_post_anchor_data'
                 return False, "No post-anchor data", 0, 0
 
             closes = post_data['Close']
@@ -114,48 +117,62 @@ class PullbackScreener:
 
             max_consec = max(streaks) if streaks else 0
             num_crosses = len(streaks)
-            if num_crosses > self.max_brief_crosses:
-                return False, f"Crossed below AVWAP {num_crosses} times", 0, max_consec
-
             # FIX 1: avwap_series.iloc[-1] is now a scalar float
             cmp = data['Close'].iloc[-1]
             avwap_latest = avwap_series.iloc[-1]
             dist = ((cmp - avwap_latest) / avwap_latest) * 100
 
+            check.update(close=float(cmp), avwap=float(avwap_latest), distance_pct=float(dist),
+                         crosses=num_crosses, longest_below=max_consec,
+                         turnover=float(cmp * data['Volume'].iloc[-1]))
+            if num_crosses > self.max_brief_crosses:
+                check['status'] = 'crosses'
+                return False, f"Crossed below AVWAP {num_crosses} times", 0, max_consec
+
             if self.proximity_low_pct <= dist <= self.proximity_high_pct:
+                check['status'] = 'turnover'
                 # FIX 2: return raw turnover — no /100_000 here
                 raw_turnover = cmp * data['Volume'].iloc[-1]
                 return True, dist, raw_turnover, max_consec
 
+            check['status'] = 'outside_proximity'
             return False, f"Dist {dist:.2f}% out of range", 0, max_consec
 
         except Exception as e:
+            check['status'] = 'calculation_error'
             return False, f"Error: {e}", 0, 0
 
     def _screen_stock(self, symbol, data):
         results = []
         hits = []
+        periods = self.diagnostics.setdefault(symbol, {'periods': {}})['periods']
 
         for period in self.anchor_periods:
+            check = periods[period] = {'status': 'insufficient_history'}
             try:
                 anchors = find_anchor_points(data, [period], self.min_periods_old)
 
                 if anchors is None:
+                    if period <= self.min_periods_old:
+                        check['status'] = 'anchor_age_excludes_window'
                     continue
 
                 for key, info in anchors.items():
                     avwap = calculate_avwap_low(data, anchor_date=info['date'])
 
+                    check.update(anchor=str(info['date'].date()), status='avwap_unavailable',
+                                 history_short=len(data) < period)
                     if avwap is None:
                         continue
 
                     passes, result, raw_turnover, max_below = self._check_criteria(
-                        data, info['idx'], avwap
+                        data, info['idx'], avwap, check
                     )
 
                     # FIX 2: compare raw_turnover against self.min_turnover (both raw)
                     # Previously: turnover was in lakhs, min_turnover was raw → always False
                     if passes and raw_turnover >= self.min_turnover:
+                        check['status'] = 'passed'
                         if self.timeframe == 'daily':
                             period_label = f"{period}d"
                         elif self.timeframe == 'weekly':
@@ -182,6 +199,7 @@ class PullbackScreener:
                         })
 
             except Exception:
+                check['status'] = 'calculation_error'
                 continue
 
         # FIX 3: find_anchor_points() only dedupes across periods passed to it
@@ -207,7 +225,8 @@ class PullbackScreener:
 
         return results, hits
 
-    def run(self):
+    def run(self, history_batch=None):
+        self.diagnostics = {}
         all_results = []
 
         print(f"\n{'═'*60}")
@@ -219,10 +238,11 @@ class PullbackScreener:
         print(f"  Proximity: {self.proximity_low_pct}%-{self.proximity_high_pct}%")
         print(f"{'═'*60}\n")
 
-        histories, fetch_statuses = fetch_history_batch(
+        histories, fetch_statuses = history_batch if history_batch is not None else fetch_history_batch(
             self.stocks,
             self.timeframe,
             self.anchor_periods,
+            window=get_history_window(self.timeframe, self.anchor_periods, pullback=True),
         )
 
         for idx, stock in enumerate(self.stocks, 1):
@@ -231,6 +251,7 @@ class PullbackScreener:
             data = histories.get(stock)
             if data is None:
                 status = fetch_statuses.get(stock)
+                self.diagnostics[stock] = {'status': status.status if status else 'fetch_error'}
                 if status is None:
                     print("  ⚠  Fetch error: missing fetch status")
                 elif status.status == FETCH_NO_DATA:
@@ -240,6 +261,7 @@ class PullbackScreener:
                     print(f"  ⚠  {self._fetch_status_label(status)}{message}")
                 continue
 
+            self.diagnostics[stock] = {'status': 'evaluated', 'bars': len(data), 'periods': {}}
             results, hits = self._screen_stock(stock, data)
             all_results.extend(results)
 

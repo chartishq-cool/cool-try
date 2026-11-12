@@ -34,6 +34,7 @@ class BreakoutScreener:
     """
 
     def __init__(self, stocks, market, timeframe, anchor_periods, config):
+        self.diagnostics = {}
         self.stocks = stocks
         self.market = market
         self.timeframe = timeframe
@@ -78,7 +79,7 @@ class BreakoutScreener:
             return "No data"
         return "No data"
 
-    def _classify_breakouts(self, df_avwap, start_date):
+    def _classify_breakouts(self, df_avwap, start_date, check=None):
         """
         Classify breakouts: find first successful crossover above AVWAP.
 
@@ -96,6 +97,10 @@ class BreakoutScreener:
         if above.iloc[0]:
             crossing_dates = [sub.index[0]] + [d for d in crossing_dates if d != sub.index[0]]
 
+        if check is not None:
+            check.update(crossings=len(crossing_dates), pending_crossings=0,
+                         sustain_failures=0, tolerance_failures=0)
+
         failed_count = 0
         failed_dates = []
         successful_date = None
@@ -105,9 +110,13 @@ class BreakoutScreener:
 
             sustain_slice = future.iloc[:self.sustain_periods]
             if len(sustain_slice) < self.sustain_periods:
+                if check is not None:
+                    check['pending_crossings'] += 1
                 continue
 
             if not (sustain_slice['Close'] > sustain_slice['AVWAP']).all():
+                if check is not None:
+                    check['sustain_failures'] += 1
                 failed_count += 1
                 failed_dates.append(cd)
                 continue
@@ -121,6 +130,8 @@ class BreakoutScreener:
                 post_sustain['AVWAP'] * (1 - self.tolerance_below_avwap)
             )
             if fell_below.any():
+                if check is not None:
+                    check['tolerance_failures'] += 1
                 failed_count += 1
                 failed_dates.append(cd)
             else:
@@ -132,9 +143,11 @@ class BreakoutScreener:
     def _screen_stock(self, symbol, data):
         results = []
         hits = []
+        periods = self.diagnostics.setdefault(symbol, {'periods': {}})['periods']
         end_date = datetime.now().date()
 
         for period in self.anchor_periods:
+            check = periods[period] = {'status': 'insufficient_history'}
             try:
                 if self.timeframe == 'daily':
                     anchor_date = end_date - timedelta(days=period)
@@ -165,6 +178,7 @@ class BreakoutScreener:
                 # DataFrame.join(named_Series) adds it as column 'AVWAP' — correct.
                 avwap_series = calculate_avwap(data, anchor_date=hh_date)
 
+                check.update(anchor=str(hh_date.date()), status='avwap_unavailable')
                 if avwap_series is None:
                     continue
 
@@ -173,10 +187,7 @@ class BreakoutScreener:
                 if df_avwap.empty:
                     continue
 
-                failed_count, success_date, _ = self._classify_breakouts(df_avwap, hh_date)
-
-                if success_date is None or failed_count > self.max_failed_attempts:
-                    continue
+                failed_count, success_date, _ = self._classify_breakouts(df_avwap, hh_date, check)
 
                 latest_date = df_avwap.index[-1]
                 latest_close = df_avwap.loc[latest_date, 'Close']
@@ -184,14 +195,26 @@ class BreakoutScreener:
                 latest_vol = df_avwap.loc[latest_date, 'Volume']
                 turnover = latest_close * latest_vol
 
+                check.update(close=float(latest_close), avwap=float(latest_avwap), turnover=float(turnover),
+                             distance_pct=float((latest_close / latest_avwap - 1) * 100) if latest_avwap else None,
+                             failed_attempts=failed_count)
+                if success_date is None:
+                    check['status'] = 'no_sustained_breakout'
+                    continue
+                if failed_count > self.max_failed_attempts:
+                    check['status'] = 'failed_attempts'
+                    continue
                 if turnover < self.min_turnover:
+                    check['status'] = 'turnover'
                     continue
 
                 in_range = (latest_close > latest_avwap) and \
                            (latest_close <= latest_avwap * (1 + self.ceiling))
 
                 if not in_range:
+                    check['status'] = 'outside_ceiling'
                     continue
+                check['status'] = 'passed'
 
                 pct_diff = ((latest_close - latest_avwap) / latest_avwap) * 100
 
@@ -230,11 +253,13 @@ class BreakoutScreener:
                 hits.append(f"{period_label}:{'✅' if failed_count == 0 else '🔁'}")
 
             except Exception:
+                check['status'] = 'calculation_error'
                 continue
 
         return results, hits
 
-    def run(self):
+    def run(self, history_batch=None):
+        self.diagnostics = {}
         all_results = []
 
         print(f"\n{'═'*60}")
@@ -246,7 +271,7 @@ class BreakoutScreener:
         print(f"  Sustain: {self.sustain_periods}  |  Ceiling: {self.ceiling*100:.0f}%")
         print(f"{'═'*60}\n")
 
-        histories, fetch_statuses = fetch_history_batch(
+        histories, fetch_statuses = history_batch if history_batch is not None else fetch_history_batch(
             self.stocks,
             self.timeframe,
             self.anchor_periods,
@@ -258,6 +283,7 @@ class BreakoutScreener:
             data = histories.get(stock)
             if data is None:
                 status = fetch_statuses.get(stock)
+                self.diagnostics[stock] = {'status': status.status if status else 'fetch_error'}
                 if status is None:
                     print("  ⚠  Fetch error: missing fetch status")
                 elif status.status == FETCH_NO_DATA:
@@ -267,6 +293,7 @@ class BreakoutScreener:
                     print(f"  ⚠  {self._fetch_status_label(status)}{message}")
                 continue
 
+            self.diagnostics[stock] = {'status': 'evaluated', 'bars': len(data), 'periods': {}}
             results, hits = self._screen_stock(stock, data)
             all_results.extend(results)
 
