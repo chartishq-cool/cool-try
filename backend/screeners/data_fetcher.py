@@ -41,13 +41,14 @@ class FetchStatus:
     message: str = ''
 
 
-def get_history_window(timeframe, anchor_periods):
+def get_history_window(timeframe, anchor_periods, *, pullback=False, end=None):
     """Return yfinance start/end/interval values for a screener timeframe."""
-    end = datetime.now()
+    end = end or datetime.now()
     max_period = max(anchor_periods)
 
     if timeframe == 'daily':
-        start = end - timedelta(days=max_period + 100)
+        days = max_period * 2 + 100 if pullback else max_period + 100
+        start = end - timedelta(days=days)
         interval = '1d'
     elif timeframe == 'weekly':
         start = end - timedelta(weeks=max_period + 52)
@@ -140,6 +141,7 @@ def fetch_history_batch(
     retries=None,
     pause_seconds=None,
     timeout=None,
+    window=None,
 ):
     """
     Fetch OHLCV history for symbols in yfinance batches.
@@ -151,7 +153,7 @@ def fetch_history_batch(
     if not symbol_list:
         return {}, {}
 
-    window = get_history_window(timeframe, anchor_periods)
+    window = window or get_history_window(timeframe, anchor_periods)
     batch_size = int(batch_size or os.getenv('SCREENER_YF_BATCH_SIZE', '80'))
     retries = int(retries or os.getenv('SCREENER_YF_RETRIES', '3'))
     pause_seconds = float(

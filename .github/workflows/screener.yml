@@ -1,160 +1,76 @@
 name: Screener
+run-name: ARGUS ${{ github.event.client_payload.jobId || github.run_id }}
 
 on:
   repository_dispatch:
     types: [run-screener]
   schedule:
-    - cron: '30 23 * * 0-4'   # NSE Daily Breakout    — 5:00 AM IST Mon–Fri
-    - cron: '45 23 * * 0-4'   # NSE Weekly Breakout   — 5:15 AM IST Mon–Fri
-    - cron: '15 0 * * 1-5'    # NSE Daily Pullback   — 5:45 AM IST Mon–Fri
-    - cron: '30 0 * * 1-5'    # NSE Weekly Pullback   — 6:00 AM IST Mon–Fri
+    - cron: '30 23 * * 0-4'   # 5:00 AM IST weekdays, both daily strategies
+    - cron: '45 23 * * 0-4'   # 5:15 AM IST weekdays, both weekly strategies
 
 permissions:
   contents: write
 
 jobs:
-
-  run-screener:
-    if: github.event_name == 'repository_dispatch'
+  scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
       - run: python -m pip install -r backend/requirements.txt
       - name: Run screener
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          SCREENER_MARKET: ${{ github.event.client_payload.market }}
-          SCREENER_LOGIC: ${{ github.event.client_payload.logic }}
-          SCREENER_TIMEFRAME: ${{ github.event.client_payload.timeframe }}
-          SCREENER_PARAMS: ${{ github.event.client_payload.params }}
+          EVENT: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          SCAN_ID: ${{ github.event.client_payload.jobId || github.run_id }}
+          MARKET: ${{ github.event.client_payload.market }}
+          LOGIC: ${{ github.event.client_payload.logic }}
+          TIMEFRAME: ${{ github.event.client_payload.timeframe }}
+          PARAMS: ${{ github.event.client_payload.params }}
         run: |
-          python backend/screener_dispatcher.py \
-            --market "$SCREENER_MARKET" \
-            --logic "$SCREENER_LOGIC" \
-            --timeframe "$SCREENER_TIMEFRAME" \
-            --params "$SCREENER_PARAMS"
-      - name: Commit results
+          if [ "$EVENT" = schedule ]; then
+            MARKET=NSE
+            LOGIC=scheduled
+            TIMEFRAME=daily
+            if [ "$SCHEDULE" = '45 23 * * 0-4' ]; then TIMEFRAME=weekly; fi
+            PARAMS='{}'
+          fi
+          python backend/screener_dispatcher.py --market "$MARKET" --logic "$LOGIC" \
+            --timeframe "$TIMEFRAME" --params "$PARAMS" --job-id "$SCAN_ID"
+      - name: Publish scan and dated CSVs
+        env:
+          SCAN_ID: ${{ github.event.client_payload.jobId || github.run_id }}
+          EVENT: ${{ github.event_name }}
         run: |
-          if [ -z "$(git status --short backend/results)" ]; then
-            echo "No result changes to commit."
-            exit 0
+          if [ "$EVENT" = schedule ]; then
+            run_paths=("backend/results/runs/$SCAN_ID-breakout" "backend/results/runs/$SCAN_ID-pullback")
+          else
+            run_paths=("backend/results/runs/$SCAN_ID")
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f backend/results
-          git commit -m "Add screener results"
-          git pull --rebase origin main
-          git push
-
-  scheduled-nse-daily-breakout:
-    if: github.event_name == 'schedule' && github.event.schedule == '30 23 * * 0-4'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - run: python -m pip install -r backend/requirements.txt
-      - name: Run NSE Daily Breakout (Pure Only)
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          python backend/screener_dispatcher.py \
-            --market "NSE" --logic "breakout" --timeframe "daily" \
-            --params '{"max_failed_attempts": 0}'
-      - name: Commit results
-        run: |
-          if [ -z "$(git status --short backend/results)" ]; then exit 0; fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f backend/results
-          git commit -m "Scheduled: NSE daily breakout (pure)"
-          git pull --rebase origin main
-          git push
-
-  scheduled-nse-weekly-breakout:
-    if: github.event_name == 'schedule' && github.event.schedule == '45 23 * * 0-4'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - run: python -m pip install -r backend/requirements.txt
-      - name: Run NSE Weekly Breakout (Pure Only)
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          python backend/screener_dispatcher.py \
-            --market "NSE" --logic "breakout" --timeframe "weekly" \
-            --params '{"max_failed_attempts": 0}'
-      - name: Commit results
-        run: |
-          if [ -z "$(git status --short backend/results)" ]; then exit 0; fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f backend/results
-          git commit -m "Scheduled: NSE weekly breakout (pure)"
-          git pull --rebase origin main
-          git push
-
-  scheduled-nse-daily-pullback:
-    if: github.event_name == 'schedule' && github.event.schedule == '15 0 * * 1-5'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - run: python -m pip install -r backend/requirements.txt
-      - name: Run NSE Daily Pullback (Pure Only)
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          python backend/screener_dispatcher.py \
-            --market "NSE" --logic "pullback" --timeframe "daily" \
-            --params '{"max_brief_crosses": 3}'
-      - name: Commit results
-        run: |
-          if [ -z "$(git status --short backend/results)" ]; then exit 0; fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f backend/results
-          git commit -m "Scheduled: NSE daily pullback (pure)"
-          git pull --rebase origin main
-          git push
-
-
-  scheduled-nse-weekly-pullback:
-    if: github.event_name == 'schedule' && github.event.schedule == '30 0 * * 1-5'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - run: python -m pip install -r backend/requirements.txt
-      - name: Run NSE Weekly Pullback
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          python backend/screener_dispatcher.py \
-            --market "NSE" --logic "pullback" --timeframe "weekly" \
-            --params '{"max_brief_crosses": 3}'
-      - name: Commit results
-        run: |
-          if [ -z "$(git status --short backend/results)" ]; then exit 0; fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f backend/results
-          git commit -m "Scheduled: NSE weekly pullback"
-          git pull --rebase origin main
-          git push
+          branch="$GITHUB_REF_NAME"
+          for attempt in 1 2 3 4 5; do
+            git fetch origin "$branch"
+            git reset --mixed FETCH_HEAD
+            paths=("${run_paths[@]}")
+            for dir in "${run_paths[@]}"; do
+              for csv in "$dir"/*.csv; do
+                archive="backend/results/$(basename "$csv")"
+                cp "$csv" "$archive"
+                paths+=("$archive")
+              done
+            done
+            git add -f -- "${paths[@]}"
+            if git diff --cached --quiet; then exit 0; fi
+            git commit -m "Publish ARGUS scan $SCAN_ID"
+            if git push origin "HEAD:$branch"; then exit 0; fi
+            sleep "$((attempt * 2))"
+          done
+          exit 1

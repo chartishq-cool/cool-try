@@ -90,7 +90,7 @@ def find_anchor_points(data, lookback_periods, min_periods_old):
             if len(recent) <= min_periods_old:
                 continue
 
-            candidates = recent.iloc[:-min_periods_old]
+            candidates = recent.iloc[:-min_periods_old] if min_periods_old else recent
             if candidates.empty:
                 continue
 

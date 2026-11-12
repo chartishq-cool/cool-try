@@ -8,7 +8,10 @@ import json
 import os
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+from dataclasses import replace
+from time import monotonic
+import re
 import argparse
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -17,11 +20,8 @@ if str(BASE_DIR) not in sys.path:
 
 from screeners.breakout_screener import BreakoutScreener
 from screeners.pullback_screener import PullbackScreener
-from screeners.telegram_notifier import (
-    send_telegram_message,
-    build_breakout_telegram_message,
-    build_pullback_telegram_message,
-)
+from screeners.data_fetcher import FETCH_NO_DATA, FetchStatus, fetch_history_batch, get_history_window
+from screeners.scan_report import notify, write_report
 
 
 def load_stock_list(market):
@@ -33,24 +33,29 @@ def load_stock_list(market):
     """
     stock_file = BASE_DIR / 'stock_lists' / f"{market.lower()}_stocks.json"
 
+    latest = stock_file.with_name(f'{market.lower()}_latest.json')
+    if latest.is_file():
+        stock_file = latest
+
     try:
-        with stock_file.open('r') as f:
+        with stock_file.open(encoding='utf-8') as f:
             data = json.load(f)
 
         default_suffixes = {'NSE': '.NS', 'BSE': '.BO'}
         suffix = data.get('suffix', default_suffixes.get(market.upper(), ''))
         stocks = data.get('stocks') or data.get(f'{market.lower()}_stocks', [])
-        return [
+        symbols = list(dict.fromkeys(
             stock if not suffix or stock.endswith(suffix) else f"{stock}{suffix}"
             for stock in stocks
-        ]
+        ))
+        return symbols, data.get('refresh', {'source': 'Bundled stock list', 'refreshed_at': None})
 
     except FileNotFoundError:
         print(f"❌ Stock list file not found: {stock_file}")
-        return []
+        return [], {}
     except Exception as e:
         print(f"❌ Error loading stock list: {e}")
-        return []
+        return [], {}
 
 
 def get_config(logic, timeframe, params):
@@ -101,127 +106,100 @@ def get_anchor_periods(logic, timeframe, params):
     return []
 
 
-def save_csv(df, market, logic, timeframe):
-    """
-    Save results to CSV in results/ folder.
 
-    Returns:
-        Path to saved file, or None on error.
-    """
-    date_str = datetime.now().strftime('%d%b%Y').lower()
-    filename = f"{market.lower()}_{logic}_{timeframe}_{date_str}.csv"
+IST = timezone(timedelta(hours=5, minutes=30))
+STRATEGIES = {'breakout': BreakoutScreener, 'pullback': PullbackScreener}
+SCHEDULE_DEFAULTS = {'breakout': {'max_failed_attempts': 0}, 'pullback': {'max_brief_crosses': 3}}
 
-    results_dir = BASE_DIR / 'results'
-    results_dir.mkdir(exist_ok=True)
-    filepath = results_dir / filename
 
-    try:
-        df.to_csv(filepath, index=False)
-        print(f"\n  ✔  CSV saved → {filepath}")
-        return filepath
-    except Exception as e:
-        print(f"  ❌ Error saving CSV: {e}")
-        return None
+def scheduled_params(timeframe, logic, date):
+    file = BASE_DIR / 'schedule_presets.json'
+    presets = json.loads(file.read_text(encoding='utf-8')) if file.is_file() else {}
+    preset = presets.get(f'{timeframe}-{logic}', {})
+    override = preset.get('override') or {}
+    params = override.get('params') if override.get('date') == date else None
+    return {**SCHEDULE_DEFAULTS[logic], **(preset.get('defaults') or {}), **(params or {})}
+
+
+def prepare(logic, timeframe, params, end):
+    if not isinstance(params, dict):
+        raise ValueError('Scan settings must be an object')
+    periods = get_anchor_periods(logic, timeframe, params)
+    maximum = {'daily': 2500, 'weekly': 520, 'monthly': 240}[timeframe]
+    if not isinstance(periods, list) or not 1 <= len(periods) <= 12 or any(
+        type(period) is not int or not 1 <= period <= maximum for period in periods
+    ):
+        raise ValueError(f'Choose 1–12 whole-number anchor periods from 1 to {maximum}')
+    periods = list(dict.fromkeys(periods))
+    config = get_config(logic, timeframe, params)
+    window = get_history_window(timeframe, periods, pullback=logic == 'pullback', end=end)
+    return config, periods, window
+
+
+def scan(args):
+    end = datetime.now()
+    run_date = datetime.now(IST).date().isoformat()
+    if args.logic == 'scheduled' and (args.market != 'NSE' or args.timeframe == 'monthly'):
+        raise ValueError('Scheduled presets are available for daily and weekly NSE scans')
+    strategies = list(STRATEGIES) if args.logic == 'scheduled' else [args.logic]
+    setups = {
+        logic: prepare(
+            logic, args.timeframe,
+            scheduled_params(args.timeframe, logic, run_date)
+            if args.logic == 'scheduled' else json.loads(args.params),
+            end,
+        ) for logic in strategies
+    }
+    stocks, universe = load_stock_list(args.market)
+    if not stocks:
+        raise ValueError(f'No stocks loaded for {args.market}')
+
+    window = next(iter(setups.values()))[2]
+    window = replace(window, start=min(setup[2].start for setup in setups.values()))
+    started = monotonic()
+    histories, statuses = fetch_history_batch(stocks, args.timeframe, [1], window=window)
+    print(f'History download took {monotonic() - started:.1f}s · {len(histories)}/{len(stocks)} symbols')
+
+    for logic, (config, periods, strategy_window) in setups.items():
+        run_id = f'{args.job_id}-{logic}' if args.logic == 'scheduled' else args.job_id
+        directory = BASE_DIR / 'results' / 'runs' / run_id
+        directory.mkdir(parents=True, exist_ok=True)
+        screener = STRATEGIES[logic](stocks, args.market, args.timeframe, periods, config)
+
+        # Each strategy sees its own history window even when the download is shared.
+        eligible = {}
+        for symbol, frame in histories.items():
+            start = strategy_window.start.date().isoformat()
+            sliced = frame.loc[start:] if strategy_window.start > window.start else frame
+            if len(sliced) >= 10:
+                eligible[symbol] = sliced
+        strategy_statuses = {
+            **statuses,
+            **{symbol: FetchStatus(FETCH_NO_DATA) for symbol in histories if symbol not in eligible},
+        }
+        df = screener.run((eligible, strategy_statuses))
+        filename = f'{args.market.lower()}_{logic}_{args.timeframe}_{end.strftime("%d%b%Y").lower()}.csv'
+        df.to_csv(directory / filename, index=False)
+        coverage = write_report(directory, screener, {**config, 'anchor_periods': periods}, universe, filename)
+        print(f'{run_id} · {coverage}')
+        if args.telegram_token and args.telegram_chat_id:
+            notify(screener, logic, coverage, run_id, args.telegram_token, args.telegram_chat_id)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='NSE Screener')
-    parser.add_argument('--market', default='NSE')
-    parser.add_argument('--logic', default='breakout')
-    parser.add_argument('--timeframe', default='daily')
+    parser = argparse.ArgumentParser(description='ARGUS Screener')
+    parser.add_argument('--market', choices=['NSE', 'BSE', 'NASDAQ', 'NYSE'], default='NSE')
+    parser.add_argument('--logic', choices=[*STRATEGIES, 'scheduled'], default='breakout')
+    parser.add_argument('--timeframe', choices=['daily', 'weekly', 'monthly'], default='daily')
     parser.add_argument('--params', default='{}')
+    parser.add_argument('--job-id', default=f'local-{int(datetime.now().timestamp())}')
     parser.add_argument('--telegram-token', default=os.getenv('TELEGRAM_BOT_TOKEN'))
     parser.add_argument('--telegram-chat-id', default=os.getenv('TELEGRAM_CHAT_ID'))
-
     args = parser.parse_args()
-
-    try:
-        params = json.loads(args.params) if isinstance(args.params, str) else args.params
-    except json.JSONDecodeError:
-        params = {}
-
-    if args.logic not in ['breakout', 'pullback']:
-        print(f"❌ Invalid logic: {args.logic}")
-        sys.exit(1)
-
-    if args.timeframe not in ['daily', 'weekly', 'monthly']:
-        print(f"❌ Invalid timeframe: {args.timeframe}")
-        sys.exit(1)
-
-    if args.market not in ['NSE', 'BSE', 'NASDAQ', 'NYSE']:
-        print(f"❌ Invalid market: {args.market}")
-        sys.exit(1)
-
-    stocks = load_stock_list(args.market)
-    if not stocks:
-        print(f"❌ No stocks loaded for {args.market}")
-        sys.exit(1)
-
-    config = get_config(args.logic, args.timeframe, params)
-    anchor_periods = get_anchor_periods(args.logic, args.timeframe, params)
-
-    print(f"\n{'═'*60}")
-    print(f"  SCREENER DISPATCHER")
-    print(f"{'═'*60}")
-    print(f"  Market:         {args.market}")
-    print(f"  Logic:          {args.logic}")
-    print(f"  Timeframe:      {args.timeframe}")
-    print(f"  Stocks loaded:  {len(stocks)}")
-    print(f"  Anchor periods: {anchor_periods}")
-    print(f"{'═'*60}\n")
-
-    try:
-        if args.logic == 'breakout':
-            screener = BreakoutScreener(
-                stocks, args.market, args.timeframe, anchor_periods, config
-            )
-        else:
-            screener = PullbackScreener(
-                stocks, args.market, args.timeframe, anchor_periods, config
-            )
-
-        results_df = screener.run()
-        csv_path = save_csv(results_df, args.market, args.logic, args.timeframe)
-
-        if not results_df.empty:
-            print(f"\n{'═'*60}")
-            print(f"  SUMMARY")
-            print(f"{'═'*60}")
-            print(f"  Total results: {len(results_df)}")
-
-            if args.logic == 'breakout':
-                pure = results_df[results_df['Failed Attempts'] == 0]
-                retry = results_df[results_df['Failed Attempts'] > 0]
-                print(f"  Pure breaks:   {len(pure)}")
-                print(f"  Retry breaks:  {len(retry)}")
-
-            print(f"{'═'*60}\n")
-        else:
-            print(f"\n  ❌ No results found\n")
-
-        if args.telegram_token and args.telegram_chat_id:
-            print("  Sending to Telegram...")
-
-            if args.logic == 'breakout':
-                message = build_breakout_telegram_message(results_df, anchor_periods, config, args.market)
-            else:
-                message = build_pullback_telegram_message(results_df, anchor_periods, config, args.market)
-
-            status = send_telegram_message(
-                message, args.telegram_token, args.telegram_chat_id
-            )
-            print(f"  Telegram: {status}")
-        else:
-            print("  ⚠  Telegram credentials not provided, skipping notification")
-
-        print("\n  ✔  Scan complete!")
-
-    except Exception as e:
-        print(f"\n❌ Error during scan: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+    if not re.fullmatch(r'[a-z0-9-]{1,80}', args.job_id):
+        parser.error('Invalid scan ID')
+    scan(args)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
