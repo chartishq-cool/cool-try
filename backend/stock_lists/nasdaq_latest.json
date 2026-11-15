@@ -1112,7 +1112,6 @@
     "CLBT",
     "CLDX",
     "CLFD",
-    "CLGN",
     "CLIK",
     "CLIR",
     "CLLS",
@@ -1761,8 +1760,6 @@
     "FCVT",
     "FDBC",
     "FDCF",
-    "FDFF",
-    "FDIF",
     "FDIG",
     "FDIQ",
     "FDIV",
@@ -1870,8 +1867,6 @@
     "FMAO",
     "FMB",
     "FMBH",
-    "FMED",
-    "FMET",
     "FMFC",
     "FMHI",
     "FMNB",
@@ -2964,7 +2959,9 @@
     "LOTI",
     "LOTWW",
     "LOVE",
+    "LOVI",
     "LOVIU",
+    "LOVIW",
     "LPAA",
     "LPAAU",
     "LPAAW",
@@ -3666,6 +3663,7 @@
     "OPENL",
     "OPENW",
     "OPENZ",
+    "OPHI",
     "OPI",
     "OPK",
     "OPNW",
@@ -4025,7 +4023,6 @@
     "PTGX",
     "PTH",
     "PTIR",
-    "PTLE",
     "PTLO",
     "PTN",
     "PTNQ",
@@ -5440,6 +5437,7 @@
     "WVVI",
     "WVVIP",
     "WW",
+    "WWB",
     "WWD",
     "WXM",
     "WYFI",
@@ -5596,13 +5594,27 @@
     "ZURA",
     "ZVRA",
     "ZYBT",
-    "ZYME"
+    "ZYME",
+    "ZYN"
   ],
   "refresh": {
     "source": "https://www.nasdaqtrader.com/dynamic/symdir/nasdaqlisted.txt",
-    "refreshed_at": "2026-11-13T00:48:18+00:00",
-    "added": [],
-    "removed": [],
+    "refreshed_at": "2026-11-15T23:38:44+00:00",
+    "added": [
+      "LOVI",
+      "LOVIW",
+      "OPHI",
+      "WWB",
+      "ZYN"
+    ],
+    "removed": [
+      "CLGN",
+      "FDFF",
+      "FDIF",
+      "FMED",
+      "FMET",
+      "PTLE"
+    ],
     "unmapped": []
   }
 }
