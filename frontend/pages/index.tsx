@@ -635,6 +635,9 @@ export default function Home() {
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (pollTimer.current) clearTimeout(pollTimer.current); }, []);
   const [loading, setLoading]     = useState(false);
+  const initialScanRequest = useRef<AbortController | null>(null);
+  const [scheduledResults, setScheduledResults] = useState<ScanResults[]>([]);
+  const [usingSavedScan, setUsingSavedScan] = useState(false);
   const [results, setResults]     = useState<ScanResults | null>(null);
   const [error, setError]         = useState<string | null>(null);
   const [pollCount, setPollCount] = useState(0);
@@ -643,13 +646,33 @@ export default function Home() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
 useEffect(() => {
+    const request = new AbortController();
+    initialScanRequest.current = request;
     const saved = loadLastScan();
     if (saved) {
       setResults(saved.results);
+      setUsingSavedScan(true);
       setMarket(saved.market);
       setLogic(saved.logic);
       setTimeframe(saved.timeframe);
+      setAnchorPeriods(DEFAULT_ANCHORS[saved.timeframe] ?? DEFAULT_ANCHORS.daily);
     }
+
+    void axios.get('/api/scan-status', { params: { latest: '1' }, signal: request.signal })
+      .then(({ data }) => {
+        if (request.signal.aborted || data.status !== 'completed') return;
+        const scans = data.scans.map(({ results: scan, ...metadata }: { results: ScanResults } & Partial<ScanResults>) => ({
+          ...scan, ...metadata,
+        })) as ScanResults[];
+        setScheduledResults(scans.length > 1 ? scans : []);
+        setResults(scans[0]);
+        setUsingSavedScan(false);
+      })
+      .catch((err: unknown) => {
+        if (!axios.isCancel(err)) console.warn('Could not load the latest shared scan', err);
+      });
+
+    return () => request.abort();
   }, []);
 
   useEffect(() => {
@@ -724,6 +747,9 @@ useEffect(() => {
 
   const handleRunScan = async (e: React.FormEvent) => {
     e.preventDefault();
+    initialScanRequest.current?.abort();
+    setScheduledResults([]);
+    setUsingSavedScan(false);
     setLoading(true);
     setError(null);
     setResults(null);
@@ -1003,7 +1029,17 @@ const downloadCsv = async (downloadUrl?: string, filename?: string) => {
               {presetStatus && <p role="status">{presetStatus}</p>}
             </details>
           )}
-          {results?.jobId && <div>Scan ID <code>{results.jobId}</code></div>}
+          {scheduledResults.length > 1 && (
+            <div aria-label="Latest scheduled run results" style={styles.paramsRow2}>
+              {scheduledResults.map((scan, index) => (
+                <button type="button" key={scan.jobId} aria-pressed={results?.jobId === scan.jobId}
+                  onClick={() => setResults(scan)}>
+                  Scheduled {index === 0 ? 'Breakout' : 'Pullback'} ({scan.total})
+                </button>
+              ))}
+            </div>
+          )}
+          {results?.jobId && <div>{usingSavedScan ? 'Browser-saved scan' : 'Scan ID'} <code>{results.jobId}</code>{results.summary && <> · {results.summary.market} · {results.summary.timeframe} · {'proximity_high_pct' in results.summary.settings ? 'Pullback' : 'Breakout'}</>}</div>}
           {results?.summary && <Coverage summary={results.summary} />}
           <details style={{ margin: '12px 0' }}>
             <summary>Why did this stock miss?</summary>
