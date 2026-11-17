@@ -4,10 +4,15 @@ Formats messages for both breakout and pullback results.
 """
 
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from html import escape
 
 
 MESSAGE_LIMIT = 4000
+def _message_length(text):
+    return len(text.encode('utf-16-le')) // 2
+
+
 PERIOD_SUFFIXES = {'daily': 'd', 'weekly': 'w', 'monthly': 'mo'}
 
 
@@ -20,7 +25,7 @@ def send_telegram_message(message, bot_token, chat_id):
         current = ""
         for line in message.splitlines():
             addition = (line + "\n")
-            if current and len(current) + len(addition) > MESSAGE_LIMIT:
+            if current and _message_length(current + addition) > MESSAGE_LIMIT:
                 chunks.append(current.rstrip())
                 current = addition
             else:
@@ -35,6 +40,7 @@ def send_telegram_message(message, bot_token, chat_id):
                     "chat_id": chat_id,
                     "text": chunk,
                     "disable_web_page_preview": True,
+                    "parse_mode": "HTML",
                 },
                 timeout=10,
             )
@@ -49,17 +55,19 @@ def send_telegram_message(message, bot_token, chat_id):
 
 
 def _append_symbols(lines, symbols):
-    lines.extend(["", "TradingView symbols"])
+    lines.extend(["", "<b>Copy for TradingView</b>"])
     batch = ""
     for symbol in symbols:
+        symbol = escape(str(symbol))
         next_batch = f"{batch}, {symbol}" if batch else symbol
-        if len(next_batch) >= MESSAGE_LIMIT:
-            lines.append(batch)
+        if _message_length(next_batch) + len("<pre></pre>") + 1 > MESSAGE_LIMIT:
+            if batch:
+                lines.append(f"<pre>{batch}</pre>")
             batch = symbol
         else:
             batch = next_batch
     if batch:
-        lines.append(batch)
+        lines.append(f"<pre>{batch}</pre>")
 
 
 def _append_results(lines, df_results, symbol_col, period_col, periods):
@@ -69,21 +77,21 @@ def _append_results(lines, df_results, symbol_col, period_col, periods):
         for symbol, period in zip(df_results[symbol_col], df_results[period_col]):
             symbols[symbol] = None
             by_period.setdefault(period, set()).add(symbol)
-    lines.append("Anchor counts: " + " · ".join(
-        f"{label}: {len(by_period.get(key, ()))}" for key, label in periods
-    ))
+    lines.extend(["", "<b>Stocks by anchor</b>", " · ".join(
+        f"{escape(str(label))}: <b>{len(by_period.get(key, ()))}</b>" for key, label in periods
+    )])
     if not symbols:
-        lines.append("❌ No stocks matched the criteria today.")
+        lines.extend(["", "<b>0 stocks matched</b>"])
         return "\n".join(lines)
 
-    summary = f"📊 Total unique stocks: {len(symbols)}"
+    summary = f"<b>{len(symbols)} unique stocks</b>"
     if 'Failed Attempts' in df_results.columns:
         pure = len({
             symbol for symbol, attempts in zip(df_results[symbol_col], df_results['Failed Attempts'])
             if attempts == 0
         })
-        summary += f"  |  Pure: {pure}  |  Retry only: {len(symbols) - pure}"
-    lines.append(summary)
+        summary += f" · Pure {pure} · Retry only {len(symbols) - pure}"
+    lines.extend(['', summary])
     _append_symbols(lines, symbols)
     return "\n".join(lines)
 
@@ -95,9 +103,10 @@ def build_breakout_telegram_message(df_results, anchor_periods, config, market='
     ceiling = config.get('ceiling', 0)
     sustain = config.get('sustain_periods', 0)
     lines = [
-        f"📡 {market} Breakout Scanner",
-        f"📅 {datetime.now().strftime('%d %b %Y')}  |  Timeframe: {timeframe}",
-        f"⏱ Sustain: {sustain}  |  Ceiling: {ceiling*100:.0f}%  |  Tolerance: {tolerance*100:.0f}%",
+        f"<b>{escape(str(market))} · {escape(str(timeframe).title())} Breakout</b>",
+        f"{datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime('%d %b %Y · %I:%M %p')} IST",
+        "",
+        f"Sustain <b>{escape(str(sustain))}</b> · Ceiling <b>{ceiling*100:g}%</b> · Tolerance <b>{tolerance*100:g}%</b>",
     ]
     periods = [(period, f"{period}{suffix}") for period in dict.fromkeys(anchor_periods)]
     return _append_results(lines, df_results, 'TV Symbol', 'Anchor Period', periods)
@@ -109,9 +118,10 @@ def build_pullback_telegram_message(df_results, anchor_periods, config, market='
     prox_low = config.get('proximity_low_pct', 0.0)
     prox_high = config.get('proximity_high_pct', 2.0)
     lines = [
-        f"📡 {market} Pullback Scanner",
-        f"📅 {datetime.now().strftime('%d %b %Y')}  |  Timeframe: {timeframe}",
-        f"🎯 Proximity band: {prox_low}%-{prox_high}%",
+        f"<b>{escape(str(market))} · {escape(str(timeframe).title())} Pullback</b>",
+        f"{datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime('%d %b %Y · %I:%M %p')} IST",
+        "",
+        f"Proximity <b>{escape(str(prox_low))}%–{escape(str(prox_high))}%</b>",
     ]
     suffixes = [suffix] if suffix else PERIOD_SUFFIXES.values()
     labels = [f"{period}{unit}" for period in dict.fromkeys(anchor_periods) for unit in suffixes]

@@ -4,6 +4,7 @@ Routes based on payload (market, logic, timeframe, params).
 Loads stock lists, executes appropriate screener, formats output.
 """
 
+from html import escape
 import json
 import os
 import sys
@@ -179,7 +180,7 @@ def scan(args):
             )
             message = formatter(df, periods, config, args.market)
             title, separator, details = message.partition('\n')
-            message = f"{title}\nScan ID: `{run_id}`{separator}{details}"
+            message = f"{title}\nScan ID: <code>{escape(str(run_id))}</code>{separator}{details}"
             print('Telegram:', send_telegram_message(message, args.telegram_token, args.telegram_chat_id))
 
 
