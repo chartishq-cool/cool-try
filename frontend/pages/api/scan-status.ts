@@ -102,13 +102,33 @@ const dedupedRows = Array.from(symbolRowMap.values());
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET') return res.status(405).end();
-  const { jobId, download } = req.query;
-  if (!validScanId(jobId)) return res.status(400).json({ status: 'failed', error: 'Invalid scan ID' });
+  const { download, latest } = req.query;
+  const lookupLatest = latest === '1' && download !== '1';
+  let { jobId } = req.query;
+  if (!lookupLatest && !validScanId(jobId)) return res.status(400).json({ status: 'failed', error: 'Invalid scan ID' });
   const { token, repo, error } = getGitHubConfig();
   if (!token || !repo || error) return res.status(503).json({ status: 'failed', error });
 
   try {
-    if (download !== '1') {
+    if (lookupLatest) {
+      const { data } = await axios.get<{ workflow_runs: WorkflowRun[] }>(
+        `https://api.github.com/repos/${repo}/actions/workflows/screener.yml/runs`,
+        {
+          headers: getGitHubAuthHeaders(token),
+          params: { event: 'repository_dispatch', status: 'success', per_page: 20 },
+          timeout: 10000,
+        },
+      );
+      jobId = data.workflow_runs
+        .map((run) => run.display_title.match(/^ARGUS (\d{13}-[a-f0-9-]{36})$/)?.[1])
+        .filter((id): id is string => Boolean(id))
+        .sort()
+        .pop();
+      if (!jobId) return res.json({ status: 'empty' });
+    }
+    if (!validScanId(jobId)) return res.status(400).json({ status: 'failed', error: 'Invalid scan ID' });
+
+    if (!lookupLatest && download !== '1') {
       const time = Number(jobId.split('-')[0]);
       if (!/^\d{13}-/.test(jobId) || !Number.isFinite(time)) {
         return res.status(400).json({ status: 'failed', error: 'Invalid manual scan ID' });
@@ -135,7 +155,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.send(csv.data);
     }
     return res.json({
-      status: 'completed', csvFile: summary.csv_file,
+      status: 'completed', jobId, csvFile: summary.csv_file,
       downloadUrl: `/api/scan-status?jobId=${jobId}&download=1`,
       results: parseCsvResults(csv.data), summary,
     });
