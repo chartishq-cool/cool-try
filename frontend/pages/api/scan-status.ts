@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { requireScanAccess } from '../../lib/scan-access';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getGitHubAuthHeaders, getGitHubConfig, getGitHubErrorMessage } from '../../lib/github';
 import { ScanSummary, scanFile, validScanId } from '../../lib/scan-results';
@@ -103,7 +102,6 @@ const dedupedRows = Array.from(symbolRowMap.values());
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET') return res.status(405).end();
-  if (!requireScanAccess(req, res)) return;
   const { jobId, download } = req.query;
   if (!validScanId(jobId)) return res.status(400).json({ status: 'failed', error: 'Invalid scan ID' });
   const { token, repo, error } = getGitHubConfig();
