@@ -730,7 +730,7 @@ useEffect(() => {
     setPollCount(0);
 
     try {
-      const response = await axios.post('/api/trigger-scan', { market, logic, timeframe, params: scanParams() }, { headers: { 'x-argus-key': accessKey } });
+      const response = await axios.post('/api/trigger-scan', { market, logic, timeframe, params: scanParams() });
       pollForResults(response.data.jobId);
     } catch (err: unknown) {
       setError(
@@ -749,7 +749,7 @@ useEffect(() => {
       setPollCount(++count);
       try {
         const { data } = await axios.get('/api/scan-status', {
-          params: { jobId: id }, headers: { 'x-argus-key': accessKey },
+          params: { jobId: id },
         });
         if (data.status === 'completed') {
           const completed = { ...data.results, jobId: id, summary: data.summary, csvFile: data.csvFile, downloadUrl: data.downloadUrl };
@@ -794,7 +794,6 @@ const downloadCsv = async (downloadUrl?: string, filename?: string) => {
     try {
       const res = await axios.get<string>(downloadUrl, {
         responseType: 'text',
-        headers: downloadUrl.startsWith('/api/') ? { 'x-argus-key': accessKey } : undefined,
       });
       const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
@@ -977,8 +976,6 @@ const downloadCsv = async (downloadUrl?: string, filename?: string) => {
           </div>
 
           <div style={styles.paramsRow2}>
-            <label>ARGUS access key <input type="password" autoComplete="current-password" value={accessKey}
-              onChange={(e) => setAccessKey(e.target.value)} disabled={loading || presetBusy} /></label>
             <small>{logic === 'breakout'
               ? 'Uses the latest N candles at the selected timeframe. Tolerance applies after the sustain candles.'
               : 'Uses the latest N candles at the selected timeframe. A cross counts one stretch below AVWAP.'} Turnover uses the latest candle.</small>
@@ -994,6 +991,8 @@ const downloadCsv = async (downloadUrl?: string, filename?: string) => {
               <summary>Scheduled NSE settings · {timeframe} {logic}</summary>
               <p>Load the saved settings into the scan form, then edit the fields above. Save them as the recurring default or choose one weekday for an override.</p>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <label>ARGUS access key <input type="password" autoComplete="current-password" value={accessKey}
+              onChange={(e) => setAccessKey(e.target.value)} disabled={loading || presetBusy} /></label>
                 <button type="button" disabled={loading || presetBusy} onClick={() => presetAction('load')}>Load default</button>
                 <button type="button" disabled={loading || presetBusy} onClick={() => presetAction('default')}>Save as default</button>
                 <label>Override date (IST) <input type="date" value={presetDate} onChange={(e) => setPresetDate(e.target.value)} /></label>
@@ -1008,7 +1007,7 @@ const downloadCsv = async (downloadUrl?: string, filename?: string) => {
           {results?.summary && <Coverage summary={results.summary} />}
           <details style={{ margin: '12px 0' }}>
             <summary>Why did this stock miss?</summary>
-            <ScanDiagnostics key={results?.jobId ?? 'lookup'} initialId={results?.jobId} accessKey={accessKey} />
+            <ScanDiagnostics key={results?.jobId ?? 'lookup'} initialId={results?.jobId} />
           </details>
 
           {/* Error */}

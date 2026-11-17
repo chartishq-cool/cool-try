@@ -53,7 +53,7 @@ export function Coverage({ summary }: { summary: ScanSummary }) {
   );
 }
 
-export default function ScanDiagnostics({ initialId, accessKey }: { initialId?: string; accessKey: string }) {
+export default function ScanDiagnostics({ initialId }: { initialId?: string }) {
   const [id, setId] = useState(initialId ?? '');
   const [ticker, setTicker] = useState('');
   const [result, setResult] = useState<{ diagnostic: TickerDiagnostic; summary: ScanSummary }>();
@@ -67,7 +67,7 @@ export default function ScanDiagnostics({ initialId, accessKey }: { initialId?: 
     setResult(undefined);
     try {
       const response = await axios.get('/api/ticker-check', {
-        params: { jobId: id.trim(), ticker: ticker.trim() }, headers: { 'x-argus-key': accessKey },
+        params: { jobId: id.trim(), ticker: ticker.trim() },
       });
       setResult(response.data);
     } catch (err) {

@@ -1,6 +1,5 @@
 import axios from 'axios';
 import { randomUUID } from 'crypto';
-import { requireScanAccess } from '../../lib/scan-access';
 import { markets, settingsError } from '../../lib/scan-settings';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getGitHubAuthHeaders, getGitHubConfig, getGitHubErrorMessage } from '../../lib/github';
@@ -20,7 +19,6 @@ export default async function handler(
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  if (!requireScanAccess(req, res)) return;
 
   try {
     const { market, logic, timeframe, params } = (req.body ?? {}) as {

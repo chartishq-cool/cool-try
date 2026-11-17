@@ -1,12 +1,10 @@
 import axios from 'axios';
-import { requireScanAccess } from '../../lib/scan-access';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getGitHubConfig } from '../../lib/github';
 import { ScanSummary, scanFile, TickerDiagnostic, validScanId } from '../../lib/scan-results';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET') return res.status(405).end();
-  if (!requireScanAccess(req, res)) return;
   const { jobId, ticker } = req.query;
   if (!validScanId(jobId) || typeof ticker !== 'string' || !/^[a-z0-9.\-&:_]{1,40}$/i.test(ticker)) {
     return res.status(400).json({ error: 'Enter a scan ID and a ticker such as NSE:SBIN.' });
