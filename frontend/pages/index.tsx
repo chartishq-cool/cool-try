@@ -636,6 +636,7 @@ export default function Home() {
   useEffect(() => () => { if (pollTimer.current) clearTimeout(pollTimer.current); }, []);
   const [loading, setLoading]     = useState(false);
   const initialScanRequest = useRef<AbortController | null>(null);
+  const [scheduledResults, setScheduledResults] = useState<ScanResults[]>([]);
   const [usingSavedScan, setUsingSavedScan] = useState(false);
   const [results, setResults]     = useState<ScanResults | null>(null);
   const [error, setError]         = useState<string | null>(null);
@@ -660,8 +661,11 @@ useEffect(() => {
     void axios.get('/api/scan-status', { params: { latest: '1' }, signal: request.signal })
       .then(({ data }) => {
         if (request.signal.aborted || data.status !== 'completed') return;
-        const { jobId, summary, csvFile, downloadUrl } = data;
-        setResults({ ...data.results, jobId, summary, csvFile, downloadUrl });
+        const scans = data.scans.map(({ results: scan, ...metadata }: { results: ScanResults } & Partial<ScanResults>) => ({
+          ...scan, ...metadata,
+        })) as ScanResults[];
+        setScheduledResults(scans.length > 1 ? scans : []);
+        setResults(scans[0]);
         setUsingSavedScan(false);
       })
       .catch((err: unknown) => {
@@ -744,6 +748,7 @@ useEffect(() => {
   const handleRunScan = async (e: React.FormEvent) => {
     e.preventDefault();
     initialScanRequest.current?.abort();
+    setScheduledResults([]);
     setUsingSavedScan(false);
     setLoading(true);
     setError(null);
@@ -1023,6 +1028,16 @@ const downloadCsv = async (downloadUrl?: string, filename?: string) => {
               </div>
               {presetStatus && <p role="status">{presetStatus}</p>}
             </details>
+          )}
+          {scheduledResults.length > 1 && (
+            <div aria-label="Latest scheduled run results" style={styles.paramsRow2}>
+              {scheduledResults.map((scan, index) => (
+                <button type="button" key={scan.jobId} aria-pressed={results?.jobId === scan.jobId}
+                  onClick={() => setResults(scan)}>
+                  Scheduled {index === 0 ? 'Breakout' : 'Pullback'} ({scan.total})
+                </button>
+              ))}
+            </div>
           )}
           {results?.jobId && <div>{usingSavedScan ? 'Browser-saved scan' : 'Scan ID'} <code>{results.jobId}</code>{results.summary && <> · {results.summary.market} · {results.summary.timeframe} · {'proximity_high_pct' in results.summary.settings ? 'Pullback' : 'Breakout'}</>}</div>}
           {results?.summary && <Coverage summary={results.summary} />}
