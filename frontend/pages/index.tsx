@@ -1024,7 +1024,7 @@ const downloadCsv = async (downloadUrl?: string, filename?: string) => {
               {presetStatus && <p role="status">{presetStatus}</p>}
             </details>
           )}
-          {results?.jobId && <div>{usingSavedScan ? 'Browser-saved scan' : 'Scan ID'} <code>{results.jobId}</code>{results.summary && <> · {results.summary.market} · {results.summary.timeframe} · {results.pure === undefined ? 'Pullback' : 'Breakout'}</>}</div>}
+          {results?.jobId && <div>{usingSavedScan ? 'Browser-saved scan' : 'Scan ID'} <code>{results.jobId}</code>{results.summary && <> · {results.summary.market} · {results.summary.timeframe} · {'proximity_high_pct' in results.summary.settings ? 'Pullback' : 'Breakout'}</>}</div>}
           {results?.summary && <Coverage summary={results.summary} />}
           <details style={{ margin: '12px 0' }}>
             <summary>Why did this stock miss?</summary>
