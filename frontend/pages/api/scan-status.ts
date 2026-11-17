@@ -118,14 +118,65 @@ function resultResponse(jobId: string, summary: ScanSummary, csv: string) {
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET') return res.status(405).end();
-  const { download, latest } = req.query;
+  const { download, latest, dashboard } = req.query;
   const lookupLatest = latest === '1' && download !== '1';
   let { jobId } = req.query;
-  if (!lookupLatest && !validScanId(jobId)) return res.status(400).json({ status: 'failed', error: 'Invalid scan ID' });
+  if (dashboard !== '1' && !lookupLatest && !validScanId(jobId)) return res.status(400).json({ status: 'failed', error: 'Invalid scan ID' });
   const { token, repo, error } = getGitHubConfig();
   if (!token || !repo || error) return res.status(503).json({ status: 'failed', error });
 
   try {
+    if (dashboard === '1') {
+      const listRuns = async (event: string, limit: number) => {
+        const { data } = await axios.get<{ workflow_runs: WorkflowRun[] }>(
+          `https://api.github.com/repos/${repo}/actions/workflows/screener.yml/runs`,
+          {
+            headers: getGitHubAuthHeaders(token),
+            params: { branch: 'main', status: 'success', event, per_page: limit },
+            timeout: 10000,
+          },
+        );
+        return data.workflow_runs.sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id);
+      };
+      const scheduledResults = async () => {
+        const runs = await listRuns('schedule', 14);
+        const selected = new Map<string, WorkflowRun>();
+        for (let offset = 0; offset < runs.length && selected.size < 2; offset += 4) {
+          const candidates = await Promise.all(runs.slice(offset, offset + 4).map(async (run) => {
+            const meta = await scanFile(repo, token, `${run.id}-breakout`, 'summary.json');
+            return { run, summary: JSON.parse(meta.data) as ScanSummary };
+          }));
+          for (const { run, summary } of candidates) {
+            if (summary.market === 'NSE' && ['daily', 'weekly'].includes(summary.timeframe) && !selected.has(summary.timeframe)) {
+              selected.set(summary.timeframe, run);
+            }
+          }
+        }
+        return Promise.all(Array.from(selected.values()).flatMap((run) =>
+          ['breakout', 'pullback'].map(async (strategy) => {
+            const id = `${run.id}-${strategy}`;
+            const { summary, csv } = await readResult(repo, token, id);
+            return { ...resultResponse(id, summary, csv), startedAt: run.created_at, strategy };
+          }),
+        ));
+      };
+      const manualResult = async () => {
+        const [run] = await listRuns('repository_dispatch', 1);
+        if (!run) return null;
+        const id = run.display_title.match(/^ARGUS (\d{13}-[a-f0-9-]{36})$/)?.[1];
+        if (!id) throw new Error('Latest manual workflow has no scan ID');
+        const { summary, csv } = await readResult(repo, token, id);
+        return { ...resultResponse(id, summary, csv), startedAt: run.created_at };
+      };
+      const [scheduled, manual] = await Promise.allSettled([scheduledResults(), manualResult()]);
+      return res.json({
+        scheduled: scheduled.status === 'fulfilled' ? scheduled.value : [],
+        manual: manual.status === 'fulfilled' ? manual.value : null,
+        scheduledUnavailable: scheduled.status === 'rejected',
+        manualUnavailable: manual.status === 'rejected',
+      });
+    }
+
     if (lookupLatest) {
       const { data } = await axios.get<{ workflow_runs: WorkflowRun[] }>(
         `https://api.github.com/repos/${repo}/actions/workflows/screener.yml/runs`,
