@@ -635,6 +635,8 @@ export default function Home() {
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (pollTimer.current) clearTimeout(pollTimer.current); }, []);
   const [loading, setLoading]     = useState(false);
+  const initialScanRequest = useRef<AbortController | null>(null);
+  const [usingSavedScan, setUsingSavedScan] = useState(false);
   const [results, setResults]     = useState<ScanResults | null>(null);
   const [error, setError]         = useState<string | null>(null);
   const [pollCount, setPollCount] = useState(0);
@@ -643,13 +645,30 @@ export default function Home() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
 useEffect(() => {
+    const request = new AbortController();
+    initialScanRequest.current = request;
     const saved = loadLastScan();
     if (saved) {
       setResults(saved.results);
+      setUsingSavedScan(true);
       setMarket(saved.market);
       setLogic(saved.logic);
       setTimeframe(saved.timeframe);
+      setAnchorPeriods(DEFAULT_ANCHORS[saved.timeframe] ?? DEFAULT_ANCHORS.daily);
     }
+
+    void axios.get('/api/scan-status', { params: { latest: '1' }, signal: request.signal })
+      .then(({ data }) => {
+        if (request.signal.aborted || data.status !== 'completed') return;
+        const { jobId, summary, csvFile, downloadUrl } = data;
+        setResults({ ...data.results, jobId, summary, csvFile, downloadUrl });
+        setUsingSavedScan(false);
+      })
+      .catch((err: unknown) => {
+        if (!axios.isCancel(err)) console.warn('Could not load the latest shared scan', err);
+      });
+
+    return () => request.abort();
   }, []);
 
   useEffect(() => {
@@ -724,6 +743,8 @@ useEffect(() => {
 
   const handleRunScan = async (e: React.FormEvent) => {
     e.preventDefault();
+    initialScanRequest.current?.abort();
+    setUsingSavedScan(false);
     setLoading(true);
     setError(null);
     setResults(null);
@@ -1003,7 +1024,7 @@ const downloadCsv = async (downloadUrl?: string, filename?: string) => {
               {presetStatus && <p role="status">{presetStatus}</p>}
             </details>
           )}
-          {results?.jobId && <div>Scan ID <code>{results.jobId}</code></div>}
+          {results?.jobId && <div>{usingSavedScan ? 'Browser-saved scan' : 'Scan ID'} <code>{results.jobId}</code>{results.summary && <> · {results.summary.market} · {results.summary.timeframe} · {results.pure === undefined ? 'Pullback' : 'Breakout'}</>}</div>}
           {results?.summary && <Coverage summary={results.summary} />}
           <details style={{ margin: '12px 0' }}>
             <summary>Why did this stock miss?</summary>
