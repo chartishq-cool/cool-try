@@ -4,7 +4,7 @@ import { getGitHubAuthHeaders, getGitHubConfig, getGitHubErrorMessage } from '..
 import { ScanSummary, scanFile, validScanId } from '../../lib/scan-results';
 
 type ScanResults = { total: number; pure?: number; retry?: number; symbols: string[] };
-type WorkflowRun = { status: string; conclusion: string | null; display_title: string; html_url: string };
+type WorkflowRun = { id: number; event: string; created_at: string; status: string; conclusion: string | null; display_title: string; html_url: string };
 
 function parseCsvLine(line: string): string[] {
   const result: string[] = [];
@@ -99,6 +99,22 @@ const dedupedRows = Array.from(symbolRowMap.values());
 }
 
 
+async function readResult(repo: string, token: string, jobId: string) {
+  const meta = await scanFile(repo, token, jobId, 'summary.json');
+  const summary: ScanSummary = JSON.parse(meta.data);
+  if (!/^[a-z0-9_]+\.csv$/.test(summary.csv_file)) throw new Error('Invalid result filename');
+  const csv = await scanFile(repo, token, jobId, summary.csv_file);
+  return { summary, csv: csv.data };
+}
+
+function resultResponse(jobId: string, summary: ScanSummary, csv: string) {
+  return {
+    jobId, csvFile: summary.csv_file,
+    downloadUrl: `/api/scan-status?jobId=${jobId}&download=1`,
+    results: parseCsvResults(csv), summary,
+  };
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET') return res.status(405).end();
@@ -115,20 +131,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         `https://api.github.com/repos/${repo}/actions/workflows/screener.yml/runs`,
         {
           headers: getGitHubAuthHeaders(token),
-          params: { event: 'repository_dispatch', status: 'success', per_page: 20 },
+          params: { branch: 'main', status: 'success', per_page: 20 },
           timeout: 10000,
         },
       );
-      jobId = data.workflow_runs
-        .map((run) => run.display_title.match(/^ARGUS (\d{13}-[a-f0-9-]{36})$/)?.[1])
-        .filter((id): id is string => Boolean(id))
-        .sort()
-        .pop();
-      if (!jobId) return res.json({ status: 'empty' });
+      const run = data.workflow_runs
+        .filter((item) => item.event === 'schedule' || item.event === 'repository_dispatch')
+        .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id)[0];
+      if (!run) return res.json({ status: 'empty' });
+
+      const manualId = run.display_title.match(/^ARGUS (\d{13}-[a-f0-9-]{36})$/)?.[1];
+      const ids = run.event === 'schedule'
+        ? [`${run.id}-breakout`, `${run.id}-pullback`]
+        : manualId ? [manualId] : [];
+      if (!ids.length) throw new Error('Latest workflow has no scan ID');
+
+      const scans = await Promise.all(ids.map(async (id) => {
+        const { summary, csv } = await readResult(repo, token, id);
+        return resultResponse(id, summary, csv);
+      }));
+      return res.json({ status: 'completed', scans });
     }
     if (!validScanId(jobId)) return res.status(400).json({ status: 'failed', error: 'Invalid scan ID' });
 
-    if (!lookupLatest && download !== '1') {
+    if (download !== '1') {
       const time = Number(jobId.split('-')[0]);
       if (!/^\d{13}-/.test(jobId) || !Number.isFinite(time)) {
         return res.status(400).json({ status: 'failed', error: 'Invalid manual scan ID' });
@@ -145,20 +171,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    const meta = await scanFile(repo, token, jobId, 'summary.json');
-    const summary: ScanSummary = JSON.parse(meta.data);
-    if (!/^[a-z0-9_]+\.csv$/.test(summary.csv_file)) throw new Error('Invalid result filename');
-    const csv = await scanFile(repo, token, jobId, summary.csv_file);
+    const { summary, csv } = await readResult(repo, token, jobId);
     if (download === '1') {
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${summary.csv_file}"`);
-      return res.send(csv.data);
+      return res.send(csv);
     }
-    return res.json({
-      status: 'completed', jobId, csvFile: summary.csv_file,
-      downloadUrl: `/api/scan-status?jobId=${jobId}&download=1`,
-      results: parseCsvResults(csv.data), summary,
-    });
+    return res.json({ status: 'completed', ...resultResponse(jobId, summary, csv) });
   } catch (err) {
     const missing = axios.isAxiosError(err) && err.response?.status === 404;
     return res.status(missing ? 404 : 502).json({
