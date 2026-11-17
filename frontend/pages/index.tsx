@@ -32,9 +32,9 @@ const C = {
   greenGlow:    'rgba(0, 255, 136, 0.18)',
   greenGlowLg:  'rgba(0, 255, 136, 0.08)',
   textPrimary:  '#D8EEE2',
-  textSecondary:'#6B8F7A',
-  textMuted:    '#334D3E',
-  textLabel:    '#4A7060',
+  textSecondary:'#91AD9C',
+  textMuted:    '#91AD9C',
+  textLabel:    '#91AD9C',
   red:          '#FF4466',
   redBg:        'rgba(255, 68, 102, 0.08)',
   redBorder:    'rgba(255, 68, 102, 0.25)',
@@ -53,27 +53,15 @@ const styles: Record<string, CSSProperties> = {
 
   // ── Root: full viewport, no outer scroll ───────────────────────────────────
   page: {
-    height: '100vh',
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
-    backgroundColor: C.bgVoid,
-    color: C.textPrimary,
-    fontFamily: C.fontMono,
+    minHeight: '100vh', backgroundColor: C.bgVoid, color: C.textPrimary,
+    fontFamily: C.fontMono, fontSize: '13px', lineHeight: 1.6,
   },
 
   // ── Top bar ────────────────────────────────────────────────────────────────
   topbar: {
-    borderBottom: `1px solid ${C.borderDim}`,
-    backgroundColor: C.bgBase,
-    padding: '0 28px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    height: '48px',
-    flexShrink: 0,
-    zIndex: 100,
-    backdropFilter: 'blur(12px)',
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    flexWrap: 'wrap', gap: '16px', padding: '20px clamp(16px, 4vw, 40px)',
+    maxWidth: '1100px', margin: '0 auto',
   },
   topbarLeft: {
     display: 'flex',
@@ -81,125 +69,72 @@ const styles: Record<string, CSSProperties> = {
     gap: '12px',
   },
   logoMark: {
-    width: '24px',
-    height: '24px',
-    border: `1.5px solid ${C.green}`,
-    borderRadius: '4px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    boxShadow: `0 0 10px ${C.greenGlow}`,
-    flexShrink: 0,
+    width: '32px', height: '32px', border: `1px solid ${C.borderStd}`,
+    borderRadius: '10px', backgroundColor: C.bgSurface, display: 'flex',
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
   },
   logoText: {
-    fontFamily: C.fontDisplay,
-    fontWeight: 800,
-    fontSize: '15px',
-    letterSpacing: '-0.04em',
-    color: C.textPrimary,
+    fontFamily: C.fontDisplay, fontWeight: 700, fontSize: '21px',
+    letterSpacing: '-0.02em', color: C.textPrimary,
   },
   logoSub: {
-    fontFamily: C.fontMono,
-    fontSize: '9px',
-    letterSpacing: '0.18em',
-    color: C.textMuted,
-    textTransform: 'uppercase' as const,
-    marginTop: '1px',
+    fontSize: '12px', color: C.textSecondary,
   },
   topbarRight: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    fontSize: '10px',
-    letterSpacing: '0.1em',
-    color: C.textMuted,
-    textTransform: 'uppercase' as const,
+    display: 'flex', alignItems: 'center', flexWrap: 'wrap',
+    gap: '8px', fontSize: '12px', color: C.textSecondary,
   },
   statusDot: {
-    width: '6px',
-    height: '6px',
-    borderRadius: '50%',
-    backgroundColor: C.green,
-    boxShadow: `0 0 6px ${C.green}`,
-    flexShrink: 0,
+    width: '6px', height: '6px', borderRadius: '50%',
+    backgroundColor: C.green, flexShrink: 0,
   },
 
   // ── Params bar: fixed, never scrolls ──────────────────────────────────────
   paramsBar: {
-    flexShrink: 0,
-    backgroundColor: C.bgBase,
-    borderBottom: `1px solid ${C.borderDim}`,
-    padding: '0 28px',
+    backgroundColor: C.bgSurface, border: `1px solid ${C.borderStd}`,
+    borderRadius: '10px', padding: '20px', margin: '4px auto 0',
+    maxWidth: '1100px', width: 'calc(100% - 32px)', boxSizing: 'border-box',
   },
 
   // Row 1: market / logic / timeframe / anchor / turnover / run
   paramsRow1: {
-    display: 'flex',
-    alignItems: 'center',
-    height: '62px',
-    width: '100%',
+    display: 'flex', alignItems: 'flex-end', flexWrap: 'wrap', gap: '16px',
+    width: '100%', padding: '0 0 16px',
   },
 
   // Row 2: logic-specific params
   paramsRow2: {
-    display: 'flex',
-    alignItems: 'center',
-    height: '46px',
-    borderTop: `1px solid ${C.borderDim}`,
-    gap: '0',
+    display: 'flex', alignItems: 'flex-start', flexWrap: 'wrap',
+    borderTop: `1px solid ${C.borderStd}`, paddingTop: '16px', marginTop: '4px',
+    gap: '16px', color: C.textSecondary,
   },
 
   paramGroup: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    justifyContent: 'center',
-    gap: '4px',
-    padding: '0 18px',
-    flexShrink: 0,
+    display: 'flex', flexDirection: 'column', justifyContent: 'center',
+    gap: '8px', minWidth: 0, maxWidth: '100%',
   },
 
   paramDivider: {
-    width: '1px',
-    alignSelf: 'stretch',
-    margin: '10px 0',
-    backgroundColor: C.borderDim,
-    flexShrink: 0,
+    display: 'none',
   },
 
   paramLabel: {
-    fontSize: '9px',
-    fontWeight: 700,
-    letterSpacing: '0.14em',
-    color: C.textMuted,
-    textTransform: 'uppercase' as const,
+    fontSize: '12px', fontWeight: 400, color: C.textSecondary,
     fontFamily: C.fontMono,
-    whiteSpace: 'nowrap' as const,
   },
 
   // ── Inline segment control ─────────────────────────────────────────────────
   segInline: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '2px',
-    backgroundColor: C.bgRaised,
-    border: `1px solid ${C.borderDim}`,
-    borderRadius: '5px',
-    padding: '2px',
+    display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px',
+    backgroundColor: C.bgRaised, border: `1px solid ${C.borderStd}`,
+    borderRadius: '8px', padding: '4px',
   },
 
   segBtn: {
-    padding: '4px 10px',
-    border: 'none',
-    borderRadius: '3px',
-    backgroundColor: 'transparent',
-    color: C.textSecondary,
-    fontSize: '11px',
-    fontFamily: C.fontMono,
-    fontWeight: 700,
-    letterSpacing: '0.06em',
-    cursor: 'pointer',
-    transition: 'all 150ms ease',
-    whiteSpace: 'nowrap' as const,
+    padding: '8px 10px', border: 'none', borderRadius: '6px',
+    backgroundColor: 'transparent', color: C.textSecondary, fontSize: '12px',
+    fontFamily: C.fontMono, fontWeight: 700, cursor: 'pointer',
+    transition: 'background-color 150ms ease, color 150ms ease',
   },
   segBtnActive: {
     backgroundColor: C.bgElevated,
@@ -213,44 +148,22 @@ const styles: Record<string, CSSProperties> = {
 
   // ── Inline inputs ──────────────────────────────────────────────────────────
   inputInline: {
-    padding: '4px 10px',
-    backgroundColor: C.bgRaised,
-    border: `1px solid ${C.borderStd}`,
-    borderRadius: '5px',
-    color: C.textPrimary,
-    fontSize: '12px',
-    fontFamily: C.fontMono,
-    outline: 'none',
-    width: '170px',
-    transition: 'border-color 150ms ease, box-shadow 150ms ease',
-    boxSizing: 'border-box' as const,
-    height: '26px',
+    padding: '9px 12px', backgroundColor: C.bgRaised,
+    border: `1px solid ${C.borderStd}`, borderRadius: '8px',
+    color: C.textPrimary, fontSize: '13px', fontFamily: C.fontMono,
+    outline: 'none', width: '200px', maxWidth: '100%', height: '42px',
+    transition: 'border-color 150ms ease, box-shadow 150ms ease', boxSizing: 'border-box',
   },
   inputInlineNarrow: {
-    width: '108px',
+    width: '140px',
   },
 
   // ── Run button inside params bar ───────────────────────────────────────────
   runButtonBar: {
-    padding: '7px 22px',
-    backgroundColor: C.green,
-    color: C.bgVoid,
-    border: 'none',
-    borderRadius: '5px',
-    fontSize: '11px',
-    fontFamily: C.fontMono,
-    fontWeight: 700,
-    letterSpacing: '0.12em',
-    textTransform: 'uppercase' as const,
-    cursor: 'pointer',
-    boxShadow: `0 0 18px ${C.greenGlow}`,
-    transition: 'all 150ms ease',
-    whiteSpace: 'nowrap' as const,
-    flexShrink: 0,
-    display: 'flex',
-    alignItems: 'center',
-    gap: '7px',
-    height: '30px',
+    padding: '10px 20px', backgroundColor: C.green, color: C.bgVoid,
+    border: 'none', borderRadius: '8px', fontSize: '13px', fontFamily: C.fontMono,
+    fontWeight: 700, cursor: 'pointer', transition: 'opacity 150ms ease',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', minHeight: '42px',
   },
   runButtonBarLoading: {
     backgroundColor: C.bgElevated,
@@ -261,15 +174,11 @@ const styles: Record<string, CSSProperties> = {
 
   // ── Results pane: scrollable, takes remaining height ──────────────────────
   resultsPane: {
-    flex: 1,
-    overflowY: 'auto' as const,
-    padding: '24px 28px',
+    padding: '20px 16px 40px',
   },
   resultsPaneInner: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: '16px',
-    maxWidth: '1100px',
+    display: 'flex', flexDirection: 'column', gap: '16px',
+    maxWidth: '1100px', margin: '0 auto',
   },
 
   // ── Panel (card style used in results) ────────────────────────────────────
@@ -345,22 +254,12 @@ const styles: Record<string, CSSProperties> = {
 
   // ── Loading ───────────────────────────────────────────────────────────────
   loadingCard: {
-    backgroundColor: C.bgSurface,
-    border: `1px solid ${C.borderAccent}`,
-    borderRadius: '8px',
-    padding: '36px',
-    display: 'flex',
-    flexDirection: 'column' as const,
-    alignItems: 'center',
-    gap: '16px',
-    boxShadow: `0 0 30px ${C.greenGlowLg}`,
+    backgroundColor: C.bgSurface, border: `1px solid ${C.borderStd}`,
+    borderRadius: '10px', padding: '20px', display: 'flex',
+    flexDirection: 'column', alignItems: 'center', gap: '16px',
   },
   loadingLabel: {
-    fontFamily: C.fontMono,
-    fontSize: '11px',
-    letterSpacing: '0.14em',
-    color: C.green,
-    textTransform: 'uppercase' as const,
+    fontFamily: C.fontDisplay, fontWeight: 700, fontSize: '18px', color: C.textPrimary,
   },
   loadingBar: {
     width: '100%',
@@ -389,22 +288,13 @@ const styles: Record<string, CSSProperties> = {
     fontVariantNumeric: 'tabular-nums',
   },
   loadingTimeSub: {
-    fontSize: '10px',
-    color: C.textMuted,
-    letterSpacing: '0.1em',
-    textTransform: 'uppercase' as const,
-    marginTop: '-10px',
+    fontSize: '12px', color: C.textSecondary,
   },
 
   // ── Error ──────────────────────────────────────────────────────────────────
   errorCard: {
-    backgroundColor: C.redBg,
-    border: `1px solid ${C.redBorder}`,
-    borderRadius: '8px',
-    padding: '18px 20px',
-    display: 'flex',
-    gap: '12px',
-    alignItems: 'flex-start',
+    backgroundColor: C.bgSurface, border: `1px solid ${C.redBorder}`,
+    borderRadius: '10px', padding: '16px', display: 'flex', gap: '12px', alignItems: 'flex-start',
   },
   errorIcon: {
     color: C.red,
@@ -500,22 +390,12 @@ const styles: Record<string, CSSProperties> = {
     gridTemplateColumns: '1fr 1fr',
   },
   actionButton: {
-    padding: '11px 16px',
-    backgroundColor: 'transparent',
-    border: 'none',
-    color: C.textSecondary,
-    fontSize: '11px',
-    fontFamily: C.fontMono,
-    fontWeight: 700,
-    letterSpacing: '0.1em',
-    textTransform: 'uppercase' as const,
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '8px',
-    transition: 'all 150ms ease',
-    borderTop: `1px solid ${C.borderDim}`,
+    padding: '11px 16px', backgroundColor: 'transparent',
+    border: 'none', borderTop: `1px solid ${C.borderDim}`, color: C.textSecondary,
+    fontSize: '11px', fontFamily: C.fontMono, fontWeight: 700,
+    letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    gap: '8px', transition: 'color 150ms ease',
   },
   actionButtonLeft: {
     borderRight: `1px solid ${C.borderDim}`,
@@ -541,6 +421,7 @@ function SegBtn({
     <button
       type="button"
       disabled={disabled}
+      aria-pressed={isActive}
       onClick={() => !disabled && onClick(value)}
       style={{
         ...styles.segBtn,
@@ -571,22 +452,24 @@ function ParamInput({
   const [focused, setFocused] = useState(false);
   return (
     <div style={styles.paramGroup}>
-      <span style={styles.paramLabel}>{label}</span>
-      <input
-        type={type}
-        step={step}
-        value={value}
-        placeholder={placeholder}
-        onChange={e => onChange(e.target.value)}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        style={{
-          ...styles.inputInline,
-          ...(narrow ? styles.inputInlineNarrow : {}),
-          borderColor: focused ? C.borderAccent : C.borderStd,
-          boxShadow: focused ? `0 0 0 3px ${C.greenGlowLg}` : 'none',
-        }}
-      />
+      <label style={{ display: 'grid', gap: 8 }}>
+        <span style={styles.paramLabel}>{label}</span>
+        <input
+          type={type}
+          step={step}
+          value={value}
+          placeholder={placeholder}
+          onChange={e => onChange(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          style={{
+            ...styles.inputInline,
+            ...(narrow ? styles.inputInlineNarrow : {}),
+            borderColor: focused ? C.borderAccent : C.borderStd,
+            boxShadow: focused ? `0 0 0 3px ${C.greenGlowLg}` : 'none',
+          }}
+        />
+        </label>
     </div>
   );
 }
@@ -852,7 +735,7 @@ export default function Home() {
 
   // ─── Render ────────────────────────────────────────────────────────────────
   return (
-    <div style={styles.page}>
+    <div className="argus" style={styles.page}>
 
       {/* ── Top bar ─────────────────────────────────────────────────────────── */}
       <header style={styles.topbar}>
@@ -881,6 +764,7 @@ export default function Home() {
       {/* ── Params bar: fixed, no scroll ────────────────────────────────────── */}
       <div style={styles.paramsBar}>
         <form onSubmit={handleRunScan}>
+          <h2 style={{ fontFamily: C.fontDisplay, fontSize: 21, margin: '0 0 20px' }}>Manual scan settings</h2>
 
           {/* Row 1: core selectors + shared params + run button */}
           <div style={styles.paramsRow1}>
@@ -952,25 +836,13 @@ export default function Home() {
             />
 
             {/* Run button — pushed to right edge */}
-            <div style={{ marginLeft: 'auto', paddingLeft: '20px' }}>
+            <div style={{ marginLeft: 'auto' }}>
               <button
                 type="submit"
                 disabled={loading || presetBusy}
                 style={{
                   ...styles.runButtonBar,
                   ...(loading ? styles.runButtonBarLoading : {}),
-                }}
-                onMouseEnter={e => {
-                  if (!loading) {
-                    (e.currentTarget as HTMLButtonElement).style.boxShadow = `0 0 28px rgba(0,255,136,0.40)`;
-                    (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)';
-                  }
-                }}
-                onMouseLeave={e => {
-                  if (!loading) {
-                    (e.currentTarget as HTMLButtonElement).style.boxShadow = `0 0 18px ${C.greenGlow}`;
-                    (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)';
-                  }
                 }}
               >
                 {loading ? (
@@ -1090,6 +962,52 @@ export default function Home() {
 
         </div>
       </main>
+      <style jsx global>{`
+        .argus *, .argus *::before, .argus *::after { box-sizing: border-box; }
+        .argus small { font-size: 12px; line-height: 1.7; }
+        .argus details {
+          background: #0F161B; border: 1px solid #213040;
+          border-radius: 10px; padding: 16px;
+        }
+        .argus summary {
+          cursor: pointer; font-family: 'Syne', sans-serif;
+          font-size: 18px; font-weight: 700; color: #D8EEE2;
+          overflow-wrap: anywhere;
+        }
+        .argus details[open] > summary { margin-bottom: 16px; }
+        .argus details h2 { font-family: 'Syne', sans-serif; font-size: 18px; }
+        .argus details p { color: #91AD9C; font-size: 12px; line-height: 1.7; }
+        .argus details label { display: inline-grid; gap: 8px; font-size: 12px; color: #91AD9C; max-width: 100%; }
+        .argus details form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+        .argus details input {
+          background: #141D23; border: 1px solid #213040; border-radius: 8px;
+          color: #D8EEE2; padding: 10px 12px !important; min-height: 42px;
+          max-width: 100%; min-width: 0; font-family: 'Space Mono', monospace; font-size: 13px;
+        }
+        .argus details button {
+          background: #141D23; border: 1px solid #213040; border-radius: 8px;
+          color: #D8EEE2; font-family: 'Space Mono', monospace;
+          font-size: 12px; padding: 10px 12px !important; min-height: 42px; cursor: pointer;
+        }
+        .argus button:disabled { opacity: .45; cursor: not-allowed; }
+        .argus button:focus-visible, .argus summary:focus-visible, .argus input:focus-visible {
+          outline: 2px solid #00FF88; outline-offset: 3px;
+        }
+        .argus button:hover:not(:disabled) { filter: brightness(1.15); }
+        .argus details section { min-width: 0; overflow-x: auto; }
+        .argus table { border-collapse: collapse; font-size: 12px; }
+        .argus th, .argus td { padding: 10px; border-bottom: 1px solid #213040; text-align: left; }
+        @media (max-width: 600px) {
+          .argus header { padding: 16px !important; }
+          .argus details label, .argus details input { width: 100%; }
+          .argus details button { flex-grow: 1; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .argus *, .argus *::before, .argus *::after {
+            animation: none !important; transition: none !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
