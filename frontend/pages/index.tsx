@@ -1,10 +1,12 @@
 import { useState, CSSProperties, useEffect, useRef } from 'react';
 import axios from 'axios';
-import ScanDiagnostics, { Coverage } from '../components/ScanDiagnostics';
+import ScanDiagnostics from '../components/ScanDiagnostics';
 import type { ScanSummary } from '../lib/scan-results';
 
 interface ScanResults {
   jobId?: string;
+  startedAt?: string;
+  strategy?: string;
   summary?: ScanSummary;
   total: number;
   pure?: number;
@@ -635,43 +637,52 @@ export default function Home() {
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (pollTimer.current) clearTimeout(pollTimer.current); }, []);
   const [loading, setLoading]     = useState(false);
-  const initialScanRequest = useRef<AbortController | null>(null);
+  const manualCompletedHere = useRef(false);
   const [scheduledResults, setScheduledResults] = useState<ScanResults[]>([]);
   const [usingSavedScan, setUsingSavedScan] = useState(false);
-  const [results, setResults]     = useState<ScanResults | null>(null);
-  const [error, setError]         = useState<string | null>(null);
-  const [pollCount, setPollCount] = useState(0);
-  const [copied, setCopied]       = useState(false);
-  const [elapsed, setElapsed]     = useState(0);
+  const [results, setResults] = useState<ScanResults | null>(null);
+  const [dashboardLoading, setDashboardLoading] = useState(true);
+  const [scheduledUnavailable, setScheduledUnavailable] = useState(false);
+  const [manualUnavailable, setManualUnavailable] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copyStatus, setCopyStatus] = useState<{ id?: string; ok: boolean } | null>(null);
+  const [elapsed, setElapsed] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-useEffect(() => {
+  useEffect(() => {
     const request = new AbortController();
-    initialScanRequest.current = request;
     const saved = loadLastScan();
     if (saved) {
       setResults(saved.results);
       setUsingSavedScan(true);
-      setMarket(saved.market);
-      setLogic(saved.logic);
-      setTimeframe(saved.timeframe);
-      setAnchorPeriods(DEFAULT_ANCHORS[saved.timeframe] ?? DEFAULT_ANCHORS.daily);
     }
 
-    void axios.get('/api/scan-status', { params: { latest: '1' }, signal: request.signal })
-      .then(({ data }) => {
-        if (request.signal.aborted || data.status !== 'completed') return;
-        const scans = data.scans.map(({ results: scan, ...metadata }: { results: ScanResults } & Partial<ScanResults>) => ({
-          ...scan, ...metadata,
-        })) as ScanResults[];
-        setScheduledResults(scans.length > 1 ? scans : []);
-        setResults(scans[0]);
-        setUsingSavedScan(false);
-      })
-      .catch((err: unknown) => {
-        if (!axios.isCancel(err)) console.warn('Could not load the latest shared scan', err);
-      });
+    type ResultPayload = Omit<ScanResults, 'symbols' | 'total' | 'pure' | 'retry'> & {
+      results: Pick<ScanResults, 'symbols' | 'total' | 'pure' | 'retry'>;
+    };
+    const flatten = ({ results: scan, ...metadata }: ResultPayload): ScanResults => ({ ...scan, ...metadata });
 
+    void axios.get('/api/scan-status', { params: { dashboard: '1' }, signal: request.signal })
+      .then(({ data }) => {
+        if (request.signal.aborted) return;
+        setScheduledResults(data.scheduled.map(flatten));
+        setScheduledUnavailable(data.scheduledUnavailable);
+        if (!manualCompletedHere.current) {
+          setManualUnavailable(data.manualUnavailable);
+          if (data.manual) {
+            setResults(flatten(data.manual));
+            setUsingSavedScan(false);
+          }
+        }
+      })
+      .catch(() => {
+        if (request.signal.aborted) return;
+        setScheduledUnavailable(true);
+        if (!manualCompletedHere.current) setManualUnavailable(true);
+      })
+      .finally(() => {
+        if (!request.signal.aborted) setDashboardLoading(false);
+      });
     return () => request.abort();
   }, []);
 
@@ -747,13 +758,8 @@ useEffect(() => {
 
   const handleRunScan = async (e: React.FormEvent) => {
     e.preventDefault();
-    initialScanRequest.current?.abort();
-    setScheduledResults([]);
-    setUsingSavedScan(false);
     setLoading(true);
     setError(null);
-    setResults(null);
-    setPollCount(0);
 
     try {
       const response = await axios.post('/api/trigger-scan', { market, logic, timeframe, params: scanParams() });
@@ -769,16 +775,17 @@ useEffect(() => {
   };
 
   const pollForResults = (id: string) => {
-    let count = 0;
     const deadline = Date.now() + 30 * 60 * 1000;
     const poll = async () => {
-      setPollCount(++count);
       try {
         const { data } = await axios.get('/api/scan-status', {
           params: { jobId: id },
         });
         if (data.status === 'completed') {
           const completed = { ...data.results, jobId: id, summary: data.summary, csvFile: data.csvFile, downloadUrl: data.downloadUrl };
+          manualCompletedHere.current = true;
+          setUsingSavedScan(false);
+          setManualUnavailable(false);
           setResults(completed);
           saveLastScan(completed, market, logic, timeframe);
           setLoading(false);
@@ -806,33 +813,39 @@ useEffect(() => {
     pollTimer.current = setTimeout(poll, 5000);
   };
 
-  const copySymbols = (symbols: string[]) => {
-    navigator.clipboard.writeText(symbols.join(', '));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2200);
+  const copySymbols = async (scan: ScanResults) => {
+    try {
+      await navigator.clipboard.writeText(scan.symbols.join(', '));
+      setCopyStatus({ id: scan.jobId, ok: true });
+    } catch {
+      setCopyStatus({ id: scan.jobId, ok: false });
+    }
   };
 
-const downloadCsv = async (downloadUrl?: string, filename?: string) => {
-    if (!downloadUrl) {
-      alert('CSV not available yet. Check GitHub results folder.');
-      return;
-    }
-    try {
-      const res = await axios.get<string>(downloadUrl, {
-        responseType: 'text',
-      });
-      const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename || 'scan_results.csv';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch {
-      alert('Download failed. Try opening the CSV link directly.');
-    }
+  const renderScanCard = (title: string, scan: ScanResults | null, unavailable: boolean, cached = false) => {
+    const timestamp = scan?.startedAt ?? (/^\d{13}-/.test(scan?.jobId ?? '') ? Number(scan?.jobId?.split('-')[0]) : undefined);
+    const date = timestamp === undefined ? null : new Date(timestamp);
+    const label = date && Number.isFinite(date.getTime())
+      ? new Intl.DateTimeFormat('en-IN', {
+        timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric',
+        hour: 'numeric', minute: '2-digit',
+      }).format(date) + ' IST'
+      : 'Run time unavailable';
+    const status = scan && copyStatus?.id === scan.jobId ? copyStatus : null;
+    return (
+      <article key={title} style={{ background: C.bgSurface, border: `1px solid ${C.borderStd}`, borderRadius: 10, padding: 16, display: 'grid', gap: 10, minWidth: 0 }}>
+        <h3 style={{ margin: 0, fontFamily: C.fontDisplay, fontSize: 18 }}>{title}</h3>
+        {scan ? <>
+          <div style={{ color: C.green, fontSize: 22, fontWeight: 700 }}>{scan.total} <span style={{ fontSize: 13 }}>stocks</span></div>
+          <div style={{ fontSize: 12 }}>{label}{cached && ' · Browser-saved'}</div>
+          <button type="button" disabled={!scan.symbols.length} style={styles.actionButton}
+            onClick={() => void copySymbols(scan)}>
+            {status?.ok ? 'Copied' : 'Copy for TradingView'}
+          </button>
+          {status && !status.ok && <span role="status" style={{ fontSize: 12 }}>Clipboard unavailable. Try again.</span>}
+        </> : <div style={{ fontSize: 12 }}>{dashboardLoading ? 'Loading results…' : unavailable ? 'Results unavailable' : 'No published result'}</div>}
+      </article>
+    );
   };
 
   const availableTimeframes = ['daily', 'weekly', 'monthly'];
@@ -1029,18 +1042,24 @@ const downloadCsv = async (downloadUrl?: string, filename?: string) => {
               {presetStatus && <p role="status">{presetStatus}</p>}
             </details>
           )}
-          {scheduledResults.length > 1 && (
-            <div aria-label="Latest scheduled run results" style={styles.paramsRow2}>
-              {scheduledResults.map((scan, index) => (
-                <button type="button" key={scan.jobId} aria-pressed={results?.jobId === scan.jobId}
-                  onClick={() => setResults(scan)}>
-                  Scheduled {index === 0 ? 'Breakout' : 'Pullback'} ({scan.total})
-                </button>
+          <section aria-label="Scheduled scans">
+            <h2 style={{ fontFamily: C.fontDisplay, fontSize: 21, margin: '20px 0 12px' }}>Scheduled NSE scans</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 12 }}>
+              {['daily', 'weekly'].flatMap((period) => ['breakout', 'pullback'].map((strategy) =>
+                renderScanCard(
+                  `${period === 'daily' ? 'Daily' : 'Weekly'} ${strategy === 'breakout' ? 'Breakout' : 'Pullback'}`,
+                  scheduledResults.find((scan) => scan.summary?.timeframe === period && scan.strategy === strategy) ?? null,
+                  scheduledUnavailable,
+                ),
               ))}
             </div>
-          )}
-          {results?.jobId && <div>{usingSavedScan ? 'Browser-saved scan' : 'Scan ID'} <code>{results.jobId}</code>{results.summary && <> · {results.summary.market} · {results.summary.timeframe} · {'proximity_high_pct' in results.summary.settings ? 'Pullback' : 'Breakout'}</>}</div>}
-          {results?.summary && <Coverage summary={results.summary} />}
+          </section>
+          <section aria-label="Manual scans">
+            <h2 style={{ fontFamily: C.fontDisplay, fontSize: 21, margin: '20px 0 12px' }}>Manual scan</h2>
+            {renderScanCard(results?.summary
+              ? `${results.summary.market} · ${results.summary.timeframe} · ${'proximity_high_pct' in results.summary.settings ? 'Pullback' : 'Breakout'}`
+              : 'Latest manual result', results, manualUnavailable, usingSavedScan)}
+          </section>
           <details style={{ margin: '12px 0' }}>
             <summary>Why did this stock miss?</summary>
             <ScanDiagnostics key={results?.jobId ?? 'lookup'} initialId={results?.jobId} />
@@ -1066,131 +1085,6 @@ const downloadCsv = async (downloadUrl?: string, filename?: string) => {
               </div>
               <div style={styles.loadingTime}>{formatElapsed(elapsed)}</div>
               <div style={styles.loadingTimeSub}>elapsed — polling every 5s</div>
-            </div>
-          )}
-
-          {/* Results */}
-          {results && !loading && (
-            <div style={{ animation: 'fadeIn 0.4s ease' }}>
-
-              {/* Stats row */}
-              <div style={{ ...styles.panel, marginBottom: '14px' }}>
-                <div style={styles.panelHeader}>
-                  <div style={styles.panelHeaderDot} />
-                  <span style={styles.panelTitle}>Scan Complete</span>
-                  <span style={{
-                    marginLeft: 'auto',
-                    fontSize: '10px',
-                    color: C.textMuted,
-                    fontFamily: C.fontMono,
-                    letterSpacing: '0.08em',
-                  }}>
-                    {market} · {logic.toUpperCase()} · {timeframe.toUpperCase()}
-                  </span>
-                </div>
-                <div style={{ ...styles.statsRow, padding: '14px' }}>
-                  <div style={styles.statCard}>
-                    <div style={styles.statLabel}>Total Matches</div>
-                    <div style={styles.statValue}>{results.total}</div>
-                  </div>
-                  {results.pure !== undefined && (
-                    <div style={styles.statCard}>
-                      <div style={styles.statLabel}>Pure Breaks</div>
-                      <div style={{ ...styles.statValue, ...styles.statValueNeutral }}>{results.pure}</div>
-                    </div>
-                  )}
-                  {results.retry !== undefined && (
-                    <div style={styles.statCard}>
-                      <div style={styles.statLabel}>Retry Breaks</div>
-                      <div style={{ ...styles.statValue, ...styles.statValueNeutral }}>{results.retry}</div>
-                    </div>
-                  )}
-                  {results.pure === undefined && results.retry === undefined && (
-                    <>
-                      <div style={styles.statCard}>
-                        <div style={styles.statLabel}>Symbols</div>
-                        <div style={{ ...styles.statValue, ...styles.statValueNeutral }}>{results.symbols?.length ?? 0}</div>
-                      </div>
-                      <div style={styles.statCard}>
-                        <div style={styles.statLabel}>Status</div>
-                        <div style={{ ...styles.statValue, fontSize: '13px', paddingTop: '6px', color: C.green }}>DONE</div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* Symbols panel */}
-              {results.symbols && results.symbols.length > 0 ? (
-                <div style={styles.panel}>
-                  <div style={styles.symbolsHeader}>
-                    <div style={styles.symbolsHeaderLeft}>
-                      <div style={styles.panelHeaderDot} />
-                      <span style={styles.panelTitle}>Symbols</span>
-                    </div>
-                    <div style={styles.symbolsBadge}>{results.symbols.length} stocks</div>
-                  </div>
-                  <textarea
-                    value={results.symbols.join(', ')}
-                    readOnly
-                    style={styles.symbolsTextarea}
-                  />
-                  <div style={styles.symbolsActions}>
-                    <button
-                      onClick={() => copySymbols(results.symbols)}
-                      style={{ ...styles.actionButton, ...styles.actionButtonLeft }}
-                      onMouseEnter={e => {
-                        (e.currentTarget as HTMLButtonElement).style.color = C.green;
-                        (e.currentTarget as HTMLButtonElement).style.backgroundColor = C.greenMuted;
-                      }}
-                      onMouseLeave={e => {
-                        (e.currentTarget as HTMLButtonElement).style.color = C.textSecondary;
-                        (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
-                      }}
-                    >
-                      <span>{copied ? '✓' : '⧉'}</span>
-                      {copied ? 'Copied!' : 'Copy for TradingView'}
-                    </button>
-                    <button
-                      onClick={() => downloadCsv(results.downloadUrl, results.csvFile)}
-                      style={styles.actionButton}
-                      onMouseEnter={e => {
-                        (e.currentTarget as HTMLButtonElement).style.color = C.green;
-                        (e.currentTarget as HTMLButtonElement).style.backgroundColor = C.greenMuted;
-                      }}
-                      onMouseLeave={e => {
-                        (e.currentTarget as HTMLButtonElement).style.color = C.textSecondary;
-                        (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
-                      }}
-                    >
-                      <span>↓</span>
-                      Download CSV
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div style={styles.panel}>
-                  <div style={styles.noResults}>
-                    {results.summary?.coverage.evaluated === 0
-                      ? 'No tickers could be evaluated. Check scan coverage above.'
-                      : results.summary && (results.summary.coverage.skipped > 0 || results.summary.coverage.incomplete_checks > 0)
-                        ? 'No matches among the tickers and lookbacks that could be checked.'
-                        : 'No symbols matched the selected parameters.'}
-                  </div>
-                  {results.downloadUrl && <button style={styles.actionButton} onClick={() => downloadCsv(results.downloadUrl, results.csvFile)}>Download CSV</button>}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Idle */}
-          {!loading && !results && !error && (
-            <div style={styles.idleCard}>
-              <div style={styles.idleIcon}>◈</div>
-              <div style={styles.idleTitle}>Ready to Scan</div>
-              <div style={styles.idleSub}>
-                Configure parameters above and click Run Scan to begin scanning {market} for AVWAP {logic} setups.
-              </div>
             </div>
           )}
 
