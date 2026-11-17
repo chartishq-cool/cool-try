@@ -316,7 +316,6 @@
     "BJ",
     "BKD",
     "BKE",
-    "BKH",
     "BKKT",
     "BKSY",
     "BKT",
@@ -1134,6 +1133,7 @@
     "HYI",
     "HYT",
     "HYTR",
+    "HZN",
     "HZO",
     "IAG",
     "IBM",
@@ -1191,7 +1191,6 @@
     "IRT",
     "ISD",
     "IT",
-    "ITGR",
     "ITT",
     "ITUB",
     "ITW",
@@ -1300,7 +1299,6 @@
     "KSS",
     "KT",
     "KTB",
-    "KTF",
     "KTH",
     "KTN",
     "KVYO",
@@ -1363,7 +1361,6 @@
     "LUXE",
     "LVS",
     "LVWR",
-    "LVWR-W",
     "LW",
     "LXFR",
     "LXU",
@@ -1820,7 +1817,9 @@
     "PNR",
     "PNW",
     "POR",
+    "PORT",
     "PORT-U",
+    "PORT-W",
     "POST",
     "PPG",
     "PPL",
@@ -2528,11 +2527,18 @@
   ],
   "refresh": {
     "source": "https://www.nasdaqtrader.com/dynamic/symdir/otherlisted.txt",
-    "refreshed_at": "2026-11-15T23:38:45+00:00",
+    "refreshed_at": "2026-11-17T02:41:30+00:00",
     "added": [
-      "VVVV"
+      "HZN",
+      "PORT",
+      "PORT-W"
     ],
-    "removed": [],
+    "removed": [
+      "BKH",
+      "ITGR",
+      "KTF",
+      "LVWR-W"
+    ],
     "unmapped": [
       "ABR$D",
       "ABR$E",

@@ -613,7 +613,6 @@
     "BEAGU",
     "BEAM",
     "BEAT",
-    "BEATW",
     "BEDY",
     "BEEM",
     "BEEP",
@@ -794,7 +793,9 @@
     "BRLT",
     "BRNX",
     "BRNY",
+    "BRRK",
     "BRRKU",
+    "BRRKW",
     "BRRR",
     "BRTM",
     "BRTMU",
@@ -853,7 +854,6 @@
     "BSVO",
     "BSY",
     "BTBD",
-    "BTBDW",
     "BTBT",
     "BTCS",
     "BTCT",
@@ -2267,6 +2267,7 @@
     "HCMA",
     "HCMAU",
     "HCMAW",
+    "HCOP",
     "HCOW",
     "HCSG",
     "HCTI",
@@ -3537,7 +3538,6 @@
     "NWBI",
     "NWCL",
     "NWCLW",
-    "NWE",
     "NWFL",
     "NWGL",
     "NWL",
@@ -3886,7 +3886,6 @@
     "PLBC",
     "PLBL",
     "PLBY",
-    "PLCE",
     "PLCI",
     "PLCIR",
     "PLCIU",
@@ -4718,7 +4717,6 @@
     "STKS",
     "STLD",
     "STLN",
-    "STLNW",
     "STNC",
     "STNE",
     "STOK",
@@ -5599,21 +5597,18 @@
   ],
   "refresh": {
     "source": "https://www.nasdaqtrader.com/dynamic/symdir/nasdaqlisted.txt",
-    "refreshed_at": "2026-11-15T23:38:44+00:00",
+    "refreshed_at": "2026-11-17T02:41:29+00:00",
     "added": [
-      "LOVI",
-      "LOVIW",
-      "OPHI",
-      "WWB",
-      "ZYN"
+      "BRRK",
+      "BRRKW",
+      "HCOP"
     ],
     "removed": [
-      "CLGN",
-      "FDFF",
-      "FDIF",
-      "FMED",
-      "FMET",
-      "PTLE"
+      "BEATW",
+      "BTBDW",
+      "NWE",
+      "PLCE",
+      "STLNW"
     ],
     "unmapped": []
   }
