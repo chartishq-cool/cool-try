@@ -5,7 +5,10 @@ Formats messages for both breakout and pullback results.
 
 import requests
 from datetime import datetime
-from textwrap import wrap
+
+
+MESSAGE_LIMIT = 4000
+PERIOD_SUFFIXES = {'daily': 'd', 'weekly': 'w', 'monthly': 'mo'}
 
 
 def send_telegram_message(message, bot_token, chat_id):
@@ -13,15 +16,11 @@ def send_telegram_message(message, bot_token, chat_id):
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         
         # Split into ≤4096-char chunks, breaking at newlines
-        MAX_LEN = 4000  # safe margin below 4096
         chunks = []
         current = ""
-        lines = (part for line in message.split("\n")
-                 for part in (wrap(line, width=MAX_LEN - 1, break_on_hyphens=False)
-                              if len(line) >= MAX_LEN else [line]))
-        for line in lines:
+        for line in message.splitlines():
             addition = (line + "\n")
-            if len(current) + len(addition) > MAX_LEN:
+            if current and len(current) + len(addition) > MESSAGE_LIMIT:
                 chunks.append(current.rstrip())
                 current = addition
             else:
@@ -35,7 +34,6 @@ def send_telegram_message(message, bot_token, chat_id):
                 json={
                     "chat_id": chat_id,
                     "text": chunk,
-                    "parse_mode": "Markdown",
                     "disable_web_page_preview": True,
                 },
                 timeout=10,
@@ -50,127 +48,71 @@ def send_telegram_message(message, bot_token, chat_id):
         return f"Error: {type(e).__name__}"
 
 
+def _append_symbols(lines, symbols):
+    lines.extend(["", "TradingView symbols"])
+    batch = ""
+    for symbol in symbols:
+        next_batch = f"{batch}, {symbol}" if batch else symbol
+        if len(next_batch) >= MESSAGE_LIMIT:
+            lines.append(batch)
+            batch = symbol
+        else:
+            batch = next_batch
+    if batch:
+        lines.append(batch)
+
+
+def _append_results(lines, df_results, symbol_col, period_col, periods):
+    symbols = {}
+    by_period = {}
+    if not df_results.empty:
+        for symbol, period in zip(df_results[symbol_col], df_results[period_col]):
+            symbols[symbol] = None
+            by_period.setdefault(period, set()).add(symbol)
+    lines.append("Anchor counts: " + " · ".join(
+        f"{label}: {len(by_period.get(key, ()))}" for key, label in periods
+    ))
+    if not symbols:
+        lines.append("❌ No stocks matched the criteria today.")
+        return "\n".join(lines)
+
+    summary = f"📊 Total unique stocks: {len(symbols)}"
+    if 'Failed Attempts' in df_results.columns:
+        pure = len({
+            symbol for symbol, attempts in zip(df_results[symbol_col], df_results['Failed Attempts'])
+            if attempts == 0
+        })
+        summary += f"  |  Pure: {pure}  |  Retry only: {len(symbols) - pure}"
+    lines.append(summary)
+    _append_symbols(lines, symbols)
+    return "\n".join(lines)
+
+
 def build_breakout_telegram_message(df_results, anchor_periods, config, market='NSE'):
-    """
-    Build Telegram message for breakout results.
-    Groups by Pure/Retry, then by anchor period.
-    """
-    SEP = "─" * 30
-
-    if df_results.empty:
-        return (
-            f"📡 *{market} Breakout Scanner*\n"
-            f"📅 {datetime.now().strftime('%d %b %Y')}\n\n"
-            f"❌ No stocks matched the criteria today."
-        )
-
-    today = datetime.now().strftime('%d %b %Y')
-    pure = df_results[df_results['Failed Attempts'] == 0]
-    retry = df_results[df_results['Failed Attempts'] > 0]
-    anchors_str = ', '.join(str(p) for p in anchor_periods)
-
     timeframe = config.get('timeframe', 'N/A')
+    suffix = PERIOD_SUFFIXES.get(timeframe, '')
     tolerance = config.get('tolerance_below_avwap', 0)
     ceiling = config.get('ceiling', 0)
     sustain = config.get('sustain_periods', 0)
-
     lines = [
-        f"📡 *{market} Breakout Scanner*",
-        f"📅 {today}  |  Timeframe: {timeframe}  |  Anchors: {anchors_str}",
+        f"📡 {market} Breakout Scanner",
+        f"📅 {datetime.now().strftime('%d %b %Y')}  |  Timeframe: {timeframe}",
         f"⏱ Sustain: {sustain}  |  Ceiling: {ceiling*100:.0f}%  |  Tolerance: {tolerance*100:.0f}%",
     ]
-
-    if not pure.empty:
-        lines += [
-            f"\n{SEP}",
-            f"✅ *PURE FIRST BREAKS*  _({len(pure)} stocks)_",
-            SEP,
-        ]
-        for period in anchor_periods:
-            grp = pure[pure['Anchor Period'] == period]
-            if not grp.empty:
-                syms = ", ".join(grp['TV Symbol'].tolist())
-                lines.append(f"*{period}* →  {syms}")
-                lines.append("")
-
-    if not retry.empty:
-        lines += [
-            f"\n{SEP}",
-            f"🔁 *RETRY BREAKS*  _({len(retry)} stocks)_",
-            SEP,
-        ]
-        max_attempts = int(df_results['Failed Attempts'].max())
-        for attempt in range(1, max_attempts + 1):
-            grp = retry[retry['Failed Attempts'] == attempt]
-            if not grp.empty:
-                fail_label = "1 Fail" if attempt == 1 else f"{attempt} Fails"
-                syms = ", ".join(grp['TV Symbol'].tolist())
-                lines.append(f"*{fail_label}* →  {syms}")
-                lines.append("")
-
-    lines += [
-        f"\n{SEP}",
-        f"📊 Total: {len(df_results)}   ✅ Pure: {len(pure)}   🔁 Retry: {len(retry)}",
-        SEP,
-    ]
-
-    return "\n".join(lines)
+    periods = [(period, f"{period}{suffix}") for period in dict.fromkeys(anchor_periods)]
+    return _append_results(lines, df_results, 'TV Symbol', 'Anchor Period', periods)
 
 
 def build_pullback_telegram_message(df_results, anchor_periods, config, market='NSE'):
-    """
-    Build Telegram message for pullback results.
-    Groups by anchor period.
-
-    FIX 1: anchor_periods is a list of ints (e.g. [52, 156]) but the
-            DataFrame column 'Anchor_Period' contains strings like '52d' or '52w'.
-            Filtering df[df['Anchor_Period'] == 52] always returns empty rows.
-            Now iterates unique values directly from the DataFrame.
-
-    FIX 2: config has no 'proximity_band' key — it has 'proximity_low_pct'
-            and 'proximity_high_pct'. The old code always showed the
-            hardcoded default '0-2%' regardless of actual settings.
-    """
-    SEP = "─" * 30
-
-    if df_results.empty:
-        return (
-            f"📡 *{market} Pullback Scanner*\n"
-            f"📅 {datetime.now().strftime('%d %b %Y')}\n\n"
-            f"❌ No stocks matched the criteria today."
-        )
-
-    today = datetime.now().strftime('%d %b %Y')
-    anchors_str = ', '.join(str(p) for p in anchor_periods)
-
-    # FIX 2: build proximity string from the keys that actually exist in config
+    timeframe = config.get('timeframe', 'N/A')
+    suffix = PERIOD_SUFFIXES.get(timeframe)
     prox_low = config.get('proximity_low_pct', 0.0)
     prox_high = config.get('proximity_high_pct', 2.0)
-    proximity = f"{prox_low}%-{prox_high}%"
-
     lines = [
-        f"📡 *{market} Pullback Scanner*",
-        f"📅 {today}  |  Anchors: {anchors_str}",
-        f"🎯 Proximity band: {proximity}  |  Total hits: {len(df_results)}",
-        f"\n{SEP}",
+        f"📡 {market} Pullback Scanner",
+        f"📅 {datetime.now().strftime('%d %b %Y')}  |  Timeframe: {timeframe}",
+        f"🎯 Proximity band: {prox_low}%-{prox_high}%",
     ]
-
-    # FIX 1: iterate unique period labels from the actual DataFrame column
-    # ('52d', '156d', etc.) instead of filtering by raw ints (52, 156, etc.)
-    # Preserve the order by using anchor_periods as a reference.
-    seen_labels = set()
-    for period_int in anchor_periods:
-        for suffix in ('d', 'w', 'mo'):
-            label = f"{period_int}{suffix}"
-            if label in seen_labels:
-                continue
-            grp = df_results[df_results['Anchor_Period'] == label]
-            if not grp.empty:
-                seen_labels.add(label)
-                syms = ", ".join(grp['TV_Symbol'].tolist())
-                lines.append(f"*{label}* →  {syms}")
-                lines.append("")
-
-    lines.append(SEP)
-
-    return "\n".join(lines)
+    suffixes = [suffix] if suffix else PERIOD_SUFFIXES.values()
+    labels = [f"{period}{unit}" for period in dict.fromkeys(anchor_periods) for unit in suffixes]
+    return _append_results(lines, df_results, 'TV_Symbol', 'Anchor_Period', [(label, label) for label in labels])
