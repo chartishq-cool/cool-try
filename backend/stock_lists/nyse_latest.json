@@ -22,7 +22,6 @@
     "ABXL",
     "ACCO",
     "ACEL",
-    "ACH",
     "ACHR",
     "ACI",
     "ACLO",
@@ -990,7 +989,6 @@
     "GLOB",
     "GLP",
     "GLW",
-    "GM",
     "GME",
     "GMED",
     "GMMF",
@@ -2289,6 +2287,7 @@
     "TX",
     "TXNM",
     "TXO",
+    "TXR",
     "TXT",
     "TY",
     "TYG",
@@ -2527,17 +2526,13 @@
   ],
   "refresh": {
     "source": "https://www.nasdaqtrader.com/dynamic/symdir/otherlisted.txt",
-    "refreshed_at": "2026-11-17T02:41:30+00:00",
+    "refreshed_at": "2026-11-18T01:56:56+00:00",
     "added": [
-      "HZN",
-      "PORT",
-      "PORT-W"
+      "TXR"
     ],
     "removed": [
-      "BKH",
-      "ITGR",
-      "KTF",
-      "LVWR-W"
+      "ACH",
+      "GM"
     ],
     "unmapped": [
       "ABR$D",

@@ -638,7 +638,6 @@
     "DPABHUSHAN.NS",
     "DPSCLTD.NS",
     "DPWIRES.NS",
-    "DRAGARWQ.NS",
     "DRCSYSTEMS.NS",
     "DREAMFOLKS.NS",
     "DREDGECORP.NS",
@@ -686,7 +685,6 @@
     "ELIN.NS",
     "ELITECON.NS",
     "ELLEN.NS",
-    "ELPROINTL.NS",
     "EMAMILTD.NS",
     "EMAMIPAP.NS",
     "EMAMIREAL.NS",
@@ -1163,6 +1161,7 @@
     "JKIPL.NS",
     "JKLAKSHMI.NS",
     "JKPAPER.NS",
+    "JKSHAH.NS",
     "JKTYRE.NS",
     "JLHL.NS",
     "JMA.NS",
@@ -2636,22 +2635,13 @@
   ],
   "refresh": {
     "source": "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv",
-    "refreshed_at": "2026-11-17T02:41:29+00:00",
-    "added": [],
+    "refreshed_at": "2026-11-18T01:56:56+00:00",
+    "added": [
+      "JKSHAH.NS"
+    ],
     "removed": [
-      "BGLOBAL.NS",
-      "CEREBRAINT.NS",
-      "CLCIND.NS",
-      "CMICABLES.NS",
-      "EDUCOMP.NS",
-      "IMPEXFERRO.NS",
-      "LASA.NS",
-      "NAGAFERT.NS",
-      "RAJVIR.NS",
-      "SELMC.NS",
-      "SKIL.NS",
-      "SUVID-RE.NS",
-      "UNIVAFOODS.NS"
+      "DRAGARWQ.NS",
+      "ELPROINTL.NS"
     ],
     "unmapped": []
   }
