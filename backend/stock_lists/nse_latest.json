@@ -409,6 +409,7 @@
     "BPL.NS",
     "BPLPHARMA.NS",
     "BRAHMINFRA.NS",
+    "BRAHMVIRAT.NS",
     "BRIGADE.NS",
     "BRIGHOTEL.NS",
     "BRIGHTBR.NS",
@@ -2529,7 +2530,6 @@
     "VIPCLOTHNG.NS",
     "VIPIND.NS",
     "VIPULLTD.NS",
-    "VIRAT.NS",
     "VIRINCHI.NS",
     "VIRTUALG.NS",
     "VISACHROME.NS",
@@ -2635,13 +2635,12 @@
   ],
   "refresh": {
     "source": "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv",
-    "refreshed_at": "2026-11-18T01:56:56+00:00",
+    "refreshed_at": "2026-11-19T01:34:10+00:00",
     "added": [
-      "JKSHAH.NS"
+      "BRAHMVIRAT.NS"
     ],
     "removed": [
-      "DRAGARWQ.NS",
-      "ELPROINTL.NS"
+      "VIRAT.NS"
     ],
     "unmapped": []
   }

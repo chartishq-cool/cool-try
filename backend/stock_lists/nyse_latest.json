@@ -2526,14 +2526,9 @@
   ],
   "refresh": {
     "source": "https://www.nasdaqtrader.com/dynamic/symdir/otherlisted.txt",
-    "refreshed_at": "2026-11-18T01:56:56+00:00",
-    "added": [
-      "TXR"
-    ],
-    "removed": [
-      "ACH",
-      "GM"
-    ],
+    "refreshed_at": "2026-11-19T01:34:11+00:00",
+    "added": [],
+    "removed": [],
     "unmapped": [
       "ABR$D",
       "ABR$E",
