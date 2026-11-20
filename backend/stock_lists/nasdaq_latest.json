@@ -339,6 +339,7 @@
     "ANNAW",
     "ANNX",
     "ANPA",
+    "ANT",
     "ANTA",
     "ANTX",
     "ANV",
@@ -1621,6 +1622,7 @@
     "ENTX",
     "ENVB",
     "ENVX",
+    "ENVXW",
     "ENZL",
     "EOCN",
     "EOLS",
@@ -1764,6 +1766,9 @@
     "FCVT",
     "FDBC",
     "FDCF",
+    "FDGX",
+    "FDGXU",
+    "FDGXW",
     "FDIG",
     "FDIQ",
     "FDIV",
@@ -2797,9 +2802,6 @@
     "KOID",
     "KOPN",
     "KOSS",
-    "KOYN",
-    "KOYNU",
-    "KOYNW",
     "KPLT",
     "KPRX",
     "KQQQ",
@@ -4426,7 +4428,6 @@
     "SCII",
     "SCIIR",
     "SCIIU",
-    "SCKT",
     "SCLX",
     "SCLXW",
     "SCNI",
@@ -4708,7 +4709,6 @@
     "SSP",
     "SSRM",
     "SSS",
-    "SSTI",
     "SSYS",
     "STAA",
     "STAK",
@@ -5605,17 +5605,20 @@
   ],
   "refresh": {
     "source": "https://www.nasdaqtrader.com/dynamic/symdir/nasdaqlisted.txt",
-    "refreshed_at": "2026-11-19T01:34:11+00:00",
+    "refreshed_at": "2026-11-20T01:30:29+00:00",
     "added": [
-      "CCHP",
-      "GUER",
-      "IQQI",
-      "SDC"
+      "ANT",
+      "ENVXW",
+      "FDGX",
+      "FDGXU",
+      "FDGXW"
     ],
     "removed": [
-      "PCRX",
-      "SHFS",
-      "SHFSW"
+      "KOYN",
+      "KOYNU",
+      "KOYNW",
+      "SCKT",
+      "SSTI"
     ],
     "unmapped": []
   }

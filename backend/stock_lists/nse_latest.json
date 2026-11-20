@@ -508,7 +508,6 @@
     "COLPAL.NS",
     "COMFINTE.NS",
     "COMPEAU.NS",
-    "COMPINFO.NS",
     "COMPUSOFT.NS",
     "COMSYN.NS",
     "CONCOR.NS",
@@ -2114,7 +2113,7 @@
     "SHRIRAMFIN.NS",
     "SHRIRAMPPS.NS",
     "SHRJAGP.NS",
-    "SHUKRAPHAR.NS",
+    "SHUKRAMED.NS",
     "SHYAMCENT.NS",
     "SHYAMMETL.NS",
     "SHYAMTEL.NS",
@@ -2635,12 +2634,13 @@
   ],
   "refresh": {
     "source": "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv",
-    "refreshed_at": "2026-11-19T01:34:10+00:00",
+    "refreshed_at": "2026-11-20T01:30:28+00:00",
     "added": [
-      "BRAHMVIRAT.NS"
+      "SHUKRAMED.NS"
     ],
     "removed": [
-      "VIRAT.NS"
+      "COMPINFO.NS",
+      "SHUKRAPHAR.NS"
     ],
     "unmapped": []
   }

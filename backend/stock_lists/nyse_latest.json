@@ -1360,7 +1360,6 @@
     "LVS",
     "LVWR",
     "LW",
-    "LXFR",
     "LXU",
     "LYB",
     "LYG",
@@ -2526,9 +2525,11 @@
   ],
   "refresh": {
     "source": "https://www.nasdaqtrader.com/dynamic/symdir/otherlisted.txt",
-    "refreshed_at": "2026-11-19T01:34:11+00:00",
+    "refreshed_at": "2026-11-20T01:30:29+00:00",
     "added": [],
-    "removed": [],
+    "removed": [
+      "LXFR"
+    ],
     "unmapped": [
       "ABR$D",
       "ABR$E",
