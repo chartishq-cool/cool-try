@@ -1,6 +1,7 @@
 """Refresh exchange ticker snapshots, keeping the previous snapshot on error."""
 import csv
 from datetime import datetime, timezone
+import gzip
 import io
 import json
 from pathlib import Path
@@ -16,12 +17,21 @@ SOURCES = {
     'NASDAQ': 'https://www.nasdaqtrader.com/dynamic/symdir/nasdaqlisted.txt',
     'NYSE': 'https://www.nasdaqtrader.com/dynamic/symdir/otherlisted.txt',
 }
+BSE_FALLBACK = 'https://assets.upstox.com/market-quote/instruments/exchange/BSE.json.gz'
 MINIMUM = {'NSE': 1000, 'BSE': 2000, 'NASDAQ': 2000, 'NYSE': 1000}
 
 
-def load_symbols(market, response):
+def load_symbols(market, response, source):
     unmapped = set()
-    if market == 'BSE':
+    if source == BSE_FALLBACK:
+        payload = response.content
+        if payload.startswith(b'\x1f\x8b'):
+            payload = gzip.decompress(payload)
+        symbols = [
+            row['trading_symbol'] for row in json.loads(payload)
+            if row.get('segment') == 'BSE_EQ'
+        ]
+    elif market == 'BSE':
         rows = [{key.lower(): value for key, value in row.items()} for row in response.json()]
         symbols = [row['scrip_id'] for row in rows]
     else:
@@ -51,19 +61,36 @@ def load_symbols(market, response):
     return normalized, sorted(unmapped)
 
 
-def refresh(market):
-    source = SOURCES[market]
+def download_symbols(market, source, previous, check_size):
     response = requests.get(source, headers={
         'User-Agent': 'Mozilla/5.0', 'Referer': 'https://www.bseindia.com/',
     }, timeout=45)
     response.raise_for_status()
-    symbols, unmapped = load_symbols(market, response)
+    symbols, unmapped = load_symbols(market, response, source)
+    if len(symbols) < MINIMUM[market] or (check_size and len(symbols) < 0.8 * len(previous)):
+        raise ValueError(f'Unexpectedly small directory ({len(symbols)} symbols)')
+    if source == BSE_FALLBACK:
+        overlap = len(symbols & previous)
+        if overlap < 0.8 * len(previous) or len(symbols) > 1.2 * len(previous):
+            raise ValueError(f'BSE fallback coverage differs too much from the previous list '
+                             f'({overlap} matching, {len(symbols)} total, {len(previous)} previous)')
+    return symbols, unmapped
+
+
+def refresh(market):
     target = ROOT / f'{market.lower()}_latest.json'
     baseline = ROOT / f'{market.lower()}_stocks.json'
     previous_data = json.loads((target if target.exists() else baseline).read_text(encoding='utf-8-sig'))
     previous = set(previous_data.get('stocks') or previous_data[f'{market.lower()}_stocks'])
-    if len(symbols) < MINIMUM[market] or (target.exists() and len(symbols) < 0.8 * len(previous)):
-        raise ValueError(f'Unexpectedly small directory ({len(symbols)} symbols)')
+    source = SOURCES[market]
+    try:
+        symbols, unmapped = download_symbols(market, source, previous, target.exists())
+    except (requests.RequestException, ValueError, KeyError, TypeError, AttributeError) as error:
+        if market != 'BSE':
+            raise
+        print(f'::warning::BSE exchange feed unavailable. Trying Upstox. {error}')
+        source = BSE_FALLBACK
+        symbols, unmapped = download_symbols(market, source, previous, target.exists())
     refresh_info = {
         'source': source, 'refreshed_at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
         'added': sorted(symbols - previous), 'removed': sorted(previous - symbols), 'unmapped': unmapped,
@@ -83,7 +110,7 @@ if __name__ == '__main__':
     for name in SOURCES:
         try:
             refresh(name)
-        except (requests.RequestException, ValueError, KeyError, TypeError, AttributeError, OSError) as error:
+        except (requests.RequestException, ValueError, KeyError, TypeError, AttributeError, OSError, EOFError) as error:
             print(f'::warning::{name} refresh failed. Using the previous list. {error}')
             failed = True
     sys.exit(int(failed))
