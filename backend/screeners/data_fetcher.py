@@ -10,8 +10,8 @@ screening logic can stay unchanged while data failures are easier to diagnose.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta
+from dataclasses import dataclass, replace
+from datetime import date, datetime, timedelta
 from math import isfinite
 import os
 import random
@@ -37,6 +37,7 @@ class HistoryWindow:
     start: datetime
     end: datetime
     interval: str
+    daily_cutoff: date | None = None
 
 
 @dataclass
@@ -47,7 +48,7 @@ class FetchStatus:
     recovered: bool = False
 
 
-def get_history_window(timeframe, anchor_periods, *, end=None):
+def get_history_window(timeframe, anchor_periods, *, end=None, completed_sessions_only=False):
     """Return yfinance start/end/interval values for a screener timeframe."""
     end = end or datetime.now()
     max_period = max(anchor_periods)
@@ -64,10 +65,13 @@ def get_history_window(timeframe, anchor_periods, *, end=None):
     else:
         raise ValueError(f"Unsupported timeframe: {timeframe}")
 
-    return HistoryWindow(start=start, end=end, interval=interval)
+    daily_cutoff = end.date() if timeframe == 'daily' and completed_sessions_only else None
+    return HistoryWindow(start=start, end=end, interval=interval, daily_cutoff=daily_cutoff)
 
 
-def _clean_history(data):
+def _clean_history(data, *, daily_cutoff=None):
+    if data is not None and daily_cutoff is not None:
+        data = data.loc[data.index.date < daily_cutoff]
     if data is None or data.empty:
         return None, FetchStatus(FETCH_NO_DATA, 'no candle rows returned')
 
@@ -235,7 +239,8 @@ def fetch_history_batch(
                 statuses[symbol] = FetchStatus(status=status, message=message)
         else:
             for symbol in chunk:
-                data, status = _clean_history(_extract_symbol_frame(downloaded, symbol, len(chunk)))
+                data, status = _clean_history(_extract_symbol_frame(downloaded, symbol, len(chunk)),
+                                              daily_cutoff=window.daily_cutoff)
                 statuses[symbol] = status
                 if status.status == FETCH_INCOMPLETE_CANDLE:
                     incomplete.append(symbol)
@@ -247,16 +252,22 @@ def fetch_history_batch(
 
     if incomplete:
         print(f'Retrying {len(incomplete)} symbols with incomplete Yahoo candles')
+    retry_window = window
+    if window.daily_cutoff is not None:
+        # Yahoo can return blank closes on the final requested day, then return
+        # them with a later end date. Keep the scan cutoff when reading the retry.
+        retry_window = replace(window, end=window.end + timedelta(days=1))
     for chunk in _chunks(incomplete, min(batch_size, 20)):
         if pause_seconds > 0:
             time.sleep(pause_seconds)
         try:
-            downloaded = _download_symbols(chunk, window, timeout)
+            downloaded = _download_symbols(chunk, retry_window, timeout)
         except Exception as exc:
             print(f'Incomplete-candle retry failed: {type(exc).__name__}')
             continue
         for symbol in chunk:
-            data, status = _clean_history(_extract_symbol_frame(downloaded, symbol, len(chunk)))
+            data, status = _clean_history(_extract_symbol_frame(downloaded, symbol, len(chunk)),
+                                          daily_cutoff=window.daily_cutoff)
             original_issue = statuses[symbol].candle_issue
             # Keep the original problem if the retry returns no usable history or
             # only an older candle. An older close must not become today's signal.
