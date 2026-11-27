@@ -7,6 +7,7 @@ const labels: Record<string, string> = {
   not_in_universe: 'Ticker was outside this scan’s stock list',
   wrong_market: 'Ticker belongs to a different market',
   no_data: 'Yahoo returned no usable price data',
+  incomplete_candle: 'Yahoo returned incomplete candle data after retry',
   fetch_error: 'Price download failed',
   rate_limited: 'Price download may have been throttled',
   insufficient_history: 'Insufficient history for this lookback',
@@ -30,6 +31,8 @@ export function Coverage({ summary }: { summary: ScanSummary }) {
   return (
     <div style={{ margin: '10px 0', lineHeight: 1.6 }}>
       <div>{coverage.evaluated} of {coverage.requested} tickers evaluated · {coverage.skipped} skipped</div>
+      {Boolean(coverage.incomplete_candle || coverage.recovered_symbols) &&
+        <div>{coverage.incomplete_candle ?? 0} tickers skipped for incomplete candles · {coverage.recovered_symbols ?? 0} recovered on retry</div>}
       {(coverage.skipped > 0 || coverage.incomplete_checks > 0) &&
         <div>Partial coverage · {coverage.incomplete_checks} evaluated tickers had incomplete lookbacks.</div>}
       <details>
@@ -95,9 +98,17 @@ export default function ScanDiagnostics({ initialId }: { initialId?: string }) {
       {error && <p role="alert">{error}</p>}
       {diagnostic && settings && result && (
         <div aria-live="polite">
+          {diagnostic.candle_issue && (
+            <p>
+              {diagnostic.candle_recovered ? 'Recovered on retry.' : 'Incomplete candle.'}
+              {' '}{diagnostic.candle_issue.date} · Invalid fields {diagnostic.candle_issue.invalid_fields.join(', ')}
+              {' '}· Raw close {fmt(diagnostic.candle_issue.raw_close)} · Adjusted close {fmt(diagnostic.candle_issue.adjusted_close)}
+              {' '}· Volume {fmt(diagnostic.candle_issue.volume)}
+            </p>
+          )}
           {diagnostic.status !== 'evaluated' ? <p>{labels[diagnostic.status] ?? diagnostic.status}</p> : (
             <>
-              <p>{diagnostic.bars} candles available. Each row shows the first rule that blocked the match.</p>
+              <p>{diagnostic.bars} candles available{diagnostic.latest_candle && ` through ${diagnostic.latest_candle}`}. Each row shows the first rule that blocked the match.</p>
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ minWidth: '580px', width: '100%', textAlign: 'left' }}>
                   <thead><tr><th>Lookback</th><th>Outcome</th><th>Price / AVWAP</th><th>Turnover ({currency})</th><th>{isPullback ? 'Crosses' : 'Failed attempts'}</th></tr></thead>
