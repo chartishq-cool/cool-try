@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from math import isfinite
 import os
 import random
 import time
@@ -21,9 +22,11 @@ from dateutil.relativedelta import relativedelta
 import pandas as pd
 import yfinance as yf
 
-REQUIRED_COLUMNS = ['High', 'Low', 'Close', 'Volume']
+PRICE_COLUMNS = ['Open', 'High', 'Low', 'Close', 'Adj Close']
+REQUIRED_COLUMNS = [*PRICE_COLUMNS, 'Volume']
 FETCH_OK = 'ok'
 FETCH_NO_DATA = 'no_data'
+FETCH_INCOMPLETE_CANDLE = 'incomplete_candle'
 FETCH_INSUFFICIENT_HISTORY = 'insufficient_history'
 FETCH_ERROR = 'fetch_error'
 FETCH_RATE_LIMITED = 'rate_limited'
@@ -40,6 +43,8 @@ class HistoryWindow:
 class FetchStatus:
     status: str
     message: str = ''
+    candle_issue: dict | None = None
+    recovered: bool = False
 
 
 def get_history_window(timeframe, anchor_periods, *, end=None):
@@ -64,16 +69,42 @@ def get_history_window(timeframe, anchor_periods, *, end=None):
 
 def _clean_history(data):
     if data is None or data.empty:
-        return None
+        return None, FetchStatus(FETCH_NO_DATA, 'no candle rows returned')
 
-    if not all(c in data.columns for c in REQUIRED_COLUMNS):
-        return None
+    values = data.reindex(columns=REQUIRED_COLUMNS).apply(pd.to_numeric, errors='coerce')
+    volume = values['Volume']
+    # Batched histories align exchange dates. Ignore all-blank padding and zero-volume
+    # rows, but retain a price-only or volume-only row so it can be retried.
+    has_price = values[PRICE_COLUMNS].notna().any(axis=1)
+    traded = values.loc[volume.ne(0) & (volume.notna() | has_price)].sort_index()
+    if traded.empty:
+        return None, FetchStatus(FETCH_NO_DATA, 'no traded candle rows returned')
 
-    cleaned = data[data['Volume'] > 0]
-    if cleaned.empty:
-        return None
+    valid = traded.gt(0) & traded.lt(float('inf'))
+    invalid = ~valid.all(axis=1)
+    if invalid.any():
+        bad = traded.loc[invalid].iloc[-1]
+        missing = valid.columns[~valid.loc[invalid].iloc[-1]].tolist()
+        details = {
+            'date': bad.name.date().isoformat(),
+            'latest_returned': traded.index[-1].date().isoformat(),
+            'invalid_fields': missing,
+            'invalid_candles': int(invalid.sum()),
+            'raw_close': float(bad['Close']) if isfinite(bad['Close']) else None,
+            'adjusted_close': float(bad['Adj Close']) if isfinite(bad['Adj Close']) else None,
+            'volume': float(bad['Volume']) if isfinite(bad['Volume']) else None,
+        }
+        return None, FetchStatus(FETCH_INCOMPLETE_CANDLE, 'invalid Yahoo candle prices or volume', details)
 
-    return cleaned
+    if len(traded) < 10:
+        return None, FetchStatus(FETCH_INSUFFICIENT_HISTORY, f'only {len(traded)} usable candles; minimum is 10')
+
+    # Match yfinance auto_adjust, with the original fields available for validation.
+    ratio = traded['Adj Close'] / traded['Close']
+    adjusted = traded[['Open', 'High', 'Low']].mul(ratio, axis=0)
+    adjusted['Close'] = traded['Adj Close']
+    adjusted['Volume'] = traded['Volume']
+    return adjusted, FetchStatus(FETCH_OK)
 
 
 def _extract_symbol_frame(downloaded, symbol, symbol_count):
@@ -93,7 +124,7 @@ def _extract_symbol_frame(downloaded, symbol, symbol_count):
     elif symbol_count == 1:
         data = downloaded.copy()
 
-    return _clean_history(data)
+    return data
 
 
 def _looks_rate_limited(message):
@@ -123,7 +154,7 @@ def _download_symbols(symbols, window, timeout):
         threads=False,
         progress=False,
         timeout=timeout,
-        auto_adjust=True,
+        auto_adjust=False,
     )
 
 
@@ -163,6 +194,7 @@ def fetch_history_batch(
 
     histories = {}
     statuses = {}
+    incomplete = []
 
     for chunk_number, chunk in enumerate(_chunks(symbol_list, batch_size), 1):
         last_error = None
@@ -203,22 +235,33 @@ def fetch_history_batch(
                 statuses[symbol] = FetchStatus(status=status, message=message)
         else:
             for symbol in chunk:
-                data = _extract_symbol_frame(downloaded, symbol, len(chunk))
-                if data is None:
-                    statuses[symbol] = FetchStatus(
-                        status=FETCH_NO_DATA,
-                        message='no usable OHLCV data for symbol',
-                    )
-                elif len(data) < 10:
-                    statuses[symbol] = FetchStatus(
-                        status=FETCH_INSUFFICIENT_HISTORY,
-                        message=f'only {len(data)} usable candles; minimum is 10',
-                    )
-                else:
+                data, status = _clean_history(_extract_symbol_frame(downloaded, symbol, len(chunk)))
+                statuses[symbol] = status
+                if status.status == FETCH_INCOMPLETE_CANDLE:
+                    incomplete.append(symbol)
+                if data is not None:
                     histories[symbol] = data
-                    statuses[symbol] = FetchStatus(status=FETCH_OK)
 
         if pause_seconds > 0 and chunk_number * batch_size < len(symbol_list):
             time.sleep(pause_seconds)
+
+    if incomplete:
+        print(f'Retrying {len(incomplete)} symbols with incomplete Yahoo candles')
+    for chunk in _chunks(incomplete, min(batch_size, 20)):
+        if pause_seconds > 0:
+            time.sleep(pause_seconds)
+        try:
+            downloaded = _download_symbols(chunk, window, timeout)
+        except Exception as exc:
+            print(f'Incomplete-candle retry failed: {type(exc).__name__}')
+            continue
+        for symbol in chunk:
+            data, status = _clean_history(_extract_symbol_frame(downloaded, symbol, len(chunk)))
+            original_issue = statuses[symbol].candle_issue
+            # Keep the original problem if the retry returns no usable history or
+            # only an older candle. An older close must not become today's signal.
+            if data is not None and data.index[-1].date().isoformat() >= original_issue['latest_returned']:
+                histories[symbol] = data
+                statuses[symbol] = FetchStatus(FETCH_OK, candle_issue=original_issue, recovered=True)
 
     return histories, statuses

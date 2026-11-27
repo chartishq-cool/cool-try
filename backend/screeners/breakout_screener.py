@@ -98,7 +98,7 @@ class BreakoutScreener:
 
         if check is not None:
             check.update(crossings=len(crossing_dates), pending_crossings=0,
-                         sustain_failures=0, tolerance_failures=0)
+                         pending_above=False, sustain_failures=0, tolerance_failures=0)
 
         failed_count = 0
         failed_dates = []
@@ -111,6 +111,7 @@ class BreakoutScreener:
             if len(sustain_slice) < self.sustain_periods:
                 if check is not None:
                     check['pending_crossings'] += 1
+                    check['pending_above'] |= bool((sustain_slice['Close'] > sustain_slice['AVWAP']).all())
                 continue
 
             if not (sustain_slice['Close'] > sustain_slice['AVWAP']).all():

@@ -5,7 +5,8 @@ Formats messages for both breakout and pullback results.
 
 import requests
 from datetime import datetime, timedelta, timezone
-from html import escape
+from html import escape, unescape
+import re
 
 
 MESSAGE_LIMIT = 4000
@@ -16,9 +17,20 @@ def _message_length(text):
 PERIOD_SUFFIXES = {'daily': 'd', 'weekly': 'w', 'monthly': 'mo'}
 
 
-def send_telegram_message(message, bot_token, chat_id):
+def send_telegram_message(message, bot_token, chat_id, *, attachment_caption=None, scan_id=None):
     try:
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        if attachment_caption is not None and _message_length(message) > MESSAGE_LIMIT:
+            # Telegram limits a text message to 4096 characters. A single attachment
+            # keeps the four scheduled alerts intact without leaving out any stocks.
+            plain_text = unescape(re.sub(r'<[^>]+>', '', message))
+            response = requests.post(
+                url.removesuffix('sendMessage') + 'sendDocument',
+                data={'chat_id': chat_id, 'caption': attachment_caption, 'parse_mode': 'HTML'},
+                files={'document': (f'argus-{scan_id}.txt', plain_text.encode('utf-8'), 'text/plain')},
+                timeout=15,
+            )
+            return 'OK' if response.ok else f'Attachment failed: HTTP {response.status_code}'
         
         # Split into ≤4096-char chunks, breaking at newlines
         chunks = []
@@ -68,6 +80,36 @@ def _append_symbols(lines, symbols):
             batch = next_batch
     if batch:
         lines.append(f"<pre>{batch}</pre>")
+
+
+def build_scheduled_telegram_message(watchlists, coverage, candle_dates, config, market, logic, scan_id):
+    timeframe = config['timeframe']
+    lines = [
+        f'<b>{escape(market)} · {escape(timeframe.title())} {escape(logic.title())}</b>',
+        f'Scan ID: <code>{escape(scan_id)}</code>',
+        datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime('%d %b %Y · %I:%M %p IST'),
+    ]
+    if candle_dates:
+        date, count = candle_dates.most_common(1)[0]
+        others = coverage['evaluated'] - count
+        lines.append(f'Latest candle for most stocks: {date}' + (f' · {others} on other dates' if others else ''))
+        if timeframe == 'weekly':
+            lines.append('Weekly dates mark the start of the candle.')
+    lines.append(
+        f"Checked {coverage['evaluated']:,}/{coverage['requested']:,} · "
+        f"Missing/invalid candle data {coverage.get('incomplete_candle', 0):,} · "
+        f"Recovered on retry {coverage.get('recovered_symbols', 0):,} · "
+        f"Other skips {coverage['skipped'] - coverage.get('incomplete_candle', 0):,}"
+    )
+    caption = lines + ['']
+    for group in watchlists:
+        heading = f"<b>{escape(group['label'])} ({len(group['symbols'])})</b>"
+        caption.append(heading)
+        lines.extend(['', heading])
+        if group['symbols']:
+            _append_symbols(lines, group['symbols'])
+    caption.append('Full TradingView lists in the attached file.')
+    return '\n'.join(lines), '\n'.join(caption)
 
 
 def _append_results(lines, df_results, symbol_col, period_col, periods):

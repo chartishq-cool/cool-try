@@ -19,6 +19,7 @@ def coverage_for(stocks):
     counts['requested'] = len(stocks)
     counts['evaluated'] = counts.get('evaluated', 0)
     counts['skipped'] = len(stocks) - counts['evaluated']
+    counts['recovered_symbols'] = sum(bool(item.get('candle_recovered')) for item in stocks.values())
     counts['incomplete_checks'] = sum(
         any(check['status'] in {'calculation_error', 'insufficient_history', 'avwap_unavailable', 'no_post_anchor_data', 'anchor_age_excludes_window'}
             or check.get('history_short') for check in item.get('periods', {}).values())
@@ -27,13 +28,15 @@ def coverage_for(stocks):
     return dict(counts)
 
 
-def write_report(directory, screener, config, universe, filename):
+def write_report(directory, screener, config, universe, filename, candle_dates, watchlists=None):
     coverage = coverage_for(screener.diagnostics)
     meta = {
         'coverage': coverage, 'settings': config, 'universe': universe,
         'market': screener.market, 'timeframe': screener.timeframe, 'csv_file': filename,
-        'lookback_unit': 'candles',
+        'lookback_unit': 'candles', 'latest_candle_dates': dict(candle_dates),
     }
+    if watchlists is not None:
+        meta['watchlists'] = watchlists
     (directory / 'summary.json').write_text(json.dumps(meta), encoding='utf-8')
     # One small file per prefix keeps a single-symbol lookup cheap.
     buckets = defaultdict(dict)
