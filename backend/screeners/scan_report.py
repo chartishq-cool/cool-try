@@ -20,6 +20,7 @@ def coverage_for(stocks):
     counts['evaluated'] = counts.get('evaluated', 0)
     counts['skipped'] = len(stocks) - counts['evaluated']
     counts['recovered_symbols'] = sum(bool(item.get('candle_recovered')) for item in stocks.values())
+    counts['nse_recovered_symbols'] = sum(item.get('candle_recovery_source') == 'nse' for item in stocks.values())
     counts['incomplete_checks'] = sum(
         any(check['status'] in {'calculation_error', 'insufficient_history', 'avwap_unavailable', 'no_post_anchor_data', 'anchor_age_excludes_window'}
             or check.get('history_short') for check in item.get('periods', {}).values())

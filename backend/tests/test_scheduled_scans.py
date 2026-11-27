@@ -1,12 +1,16 @@
 import unittest
 from collections import Counter
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pandas as pd
 
 from screeners.breakout_screener import BreakoutScreener
-from screeners.data_fetcher import FETCH_INCOMPLETE_CANDLE, _clean_history, fetch_history_batch
+from screeners.data_fetcher import (
+    FETCH_INCOMPLETE_CANDLE, _clean_history, fetch_history_batch, get_history_window,
+)
+from screeners.nse_daily import NseCandle, NseDailySessions
 from screeners.scheduled_watchlists import scheduled_watchlists
 from screeners.telegram_notifier import build_scheduled_telegram_message, send_telegram_message
 
@@ -47,6 +51,36 @@ class CandleTests(unittest.TestCase):
                 self.assertEqual('ABC.NS' in data, recovered)
                 self.assertEqual(status['ABC.NS'].recovered, recovered)
                 self.assertEqual(status['ABC.NS'].candle_issue['invalid_fields'], ['Close', 'Adj Close'])
+
+    def test_nse_fills_missing_daily_candle_and_keeps_cutoff(self):
+        complete = candles()
+        complete['Adj Close'] = complete['Close']
+        cutoff = datetime(2026, 10, 12)
+        window = get_history_window('daily', [10], end=cutoff, completed_sessions_only=True)
+        latest, previous = (cutoff.date() - timedelta(days=n) for n in [1, 2])
+        candle = NseCandle('ISIN', 100, {'Open': 102, 'High': 106, 'Low': 101, 'Close': 105, 'Volume': 45_000})
+        prior = NseCandle('ISIN', 99, {'Close': 100})
+        backup = NseDailySessions(latest, {'ABC.NS': candle}, previous, {'ABC.NS': prior})
+        bad = complete.copy()
+        bad.loc[pd.Timestamp(latest), ['Close', 'Adj Close']] = float('nan')
+        for raw in [bad, complete.drop(index=pd.Timestamp(latest))]:
+            with self.subTest(rows=len(raw)), patch('screeners.data_fetcher._download_symbols',
+                    return_value=raw) as download, patch(
+                    'screeners.data_fetcher.load_nse_daily_sessions', return_value=backup):
+                data, statuses = fetch_history_batch(['ABC.NS'], 'daily', [10], window=window)
+            self.assertEqual(download.call_count, 1)
+            self.assertEqual(data['ABC.NS'].index.max().date(), latest)
+            self.assertEqual(data['ABC.NS'].iloc[-1]['Close'], 105)
+            self.assertEqual(data['ABC.NS'].iloc[-1]['Volume'], 45_000)
+            self.assertEqual(statuses['ABC.NS'].recovery_source, 'nse')
+
+        bad.loc[pd.Timestamp(previous), 'Adj Close'] = 95
+        with patch('screeners.data_fetcher._download_symbols', return_value=bad), patch(
+                'screeners.data_fetcher.load_nse_daily_sessions', return_value=backup), patch(
+                'screeners.data_fetcher.time.sleep'):
+            data, statuses = fetch_history_batch(['ABC.NS'], 'daily', [10], window=window)
+        self.assertNotIn('ABC.NS', data)
+        self.assertEqual(statuses['ABC.NS'].status, FETCH_INCOMPLETE_CANDLE)
 
 
 class WatchlistTests(unittest.TestCase):
