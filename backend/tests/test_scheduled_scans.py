@@ -1,12 +1,15 @@
 import unittest
 from collections import Counter
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pandas as pd
 
 from screeners.breakout_screener import BreakoutScreener
-from screeners.data_fetcher import FETCH_INCOMPLETE_CANDLE, _clean_history, fetch_history_batch
+from screeners.data_fetcher import (
+    FETCH_INCOMPLETE_CANDLE, _clean_history, fetch_history_batch, get_history_window,
+)
 from screeners.scheduled_watchlists import scheduled_watchlists
 from screeners.telegram_notifier import build_scheduled_telegram_message, send_telegram_message
 
@@ -47,6 +50,19 @@ class CandleTests(unittest.TestCase):
                 self.assertEqual('ABC.NS' in data, recovered)
                 self.assertEqual(status['ABC.NS'].recovered, recovered)
                 self.assertEqual(status['ABC.NS'].candle_issue['invalid_fields'], ['Close', 'Adj Close'])
+
+    def test_daily_retry_can_request_later_end_without_using_later_candle(self):
+        complete = candles()
+        incomplete = complete.iloc[:-1].copy()
+        incomplete.loc[incomplete.index[-1], ['Close', 'Adj Close']] = float('nan')
+        cutoff = datetime(2026, 10, 12)
+        window = get_history_window('daily', [10], end=cutoff, completed_sessions_only=True)
+        with patch('screeners.data_fetcher._download_symbols', side_effect=[incomplete, complete]) as download, \
+             patch('screeners.data_fetcher.time.sleep'):
+            data, statuses = fetch_history_batch(['ABC.NS'], 'daily', [10], window=window)
+        self.assertEqual(download.call_args.args[1].end, cutoff + timedelta(days=1))
+        self.assertEqual(data['ABC.NS'].index.max().date(), (cutoff - timedelta(days=1)).date())
+        self.assertTrue(statuses['ABC.NS'].recovered)
 
 
 class WatchlistTests(unittest.TestCase):
