@@ -10,9 +10,9 @@ screening logic can stay unchanged while data failures are easier to diagnose.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from math import isfinite
+from math import isclose, isfinite
 import os
 import random
 import time
@@ -21,6 +21,7 @@ from typing import Iterable
 from dateutil.relativedelta import relativedelta
 import pandas as pd
 import yfinance as yf
+from screeners.nse_daily import load_nse_daily_sessions
 
 PRICE_COLUMNS = ['Open', 'High', 'Low', 'Close', 'Adj Close']
 REQUIRED_COLUMNS = [*PRICE_COLUMNS, 'Volume']
@@ -46,6 +47,7 @@ class FetchStatus:
     message: str = ''
     candle_issue: dict | None = None
     recovered: bool = False
+    recovery_source: str | None = None
 
 
 def get_history_window(timeframe, anchor_periods, *, end=None, completed_sessions_only=False):
@@ -131,6 +133,50 @@ def _extract_symbol_frame(downloaded, symbol, symbol_count):
     return data
 
 
+def _check_symbol(raw, symbol, window, nse):
+    data, status = _clean_history(raw, daily_cutoff=window.daily_cutoff)
+    if nse is None or raw is None or symbol not in nse.latest:
+        return data, status
+
+    session = nse.latest_date
+    date_label = session.isoformat()
+    if data is not None and data.index[-1].date() >= session:
+        return data, status
+    if data is not None:
+        # Yahoo can omit today's required completed bar altogether.
+        status = FetchStatus(FETCH_INCOMPLETE_CANDLE, 'latest NSE candle is missing from Yahoo', {
+            'date': date_label, 'latest_returned': data.index[-1].date().isoformat(),
+            'invalid_fields': REQUIRED_COLUMNS, 'invalid_candles': 1,
+            'raw_close': None, 'adjusted_close': None, 'volume': None,
+        })
+    if status.status != FETCH_INCOMPLETE_CANDLE or status.candle_issue['date'] != date_label:
+        return None, status
+
+    official, previous = nse.latest[symbol], nse.previous.get(symbol)
+    if previous is None or previous.isin != official.isin:
+        return None, status
+    before = raw.loc[raw.index.date == nse.previous_date]
+    if len(before) != 1 or not {'Close', 'Adj Close'}.issubset(before.columns):
+        return None, status
+    # Confirm the symbol, prior session and price basis before appending an
+    # unadjusted exchange candle to dividend/split-adjusted Yahoo history.
+    prior_close = previous.prices['Close']
+    closes = [official.previous_close, *pd.to_numeric(before.iloc[0][['Close', 'Adj Close']], errors='coerce')]
+    if not all(isclose(value, prior_close, rel_tol=1e-6, abs_tol=0.001) for value in closes):
+        return None, status
+
+    latest = raw.loc[raw.index.date == session]
+    if len(latest) > 1:
+        return None, status
+    timestamp = latest.index[0] if len(latest) else pd.Timestamp(session, tz=raw.index.tz)
+    candle = pd.DataFrame([{**official.prices, 'Adj Close': official.prices['Close']}], index=[timestamp])
+    patched = pd.concat([raw.drop(index=timestamp, errors='ignore'), candle])
+    data, _ = _clean_history(patched, daily_cutoff=window.daily_cutoff)
+    if data is None or data.index[-1].date() != session:
+        return None, status
+    return data, FetchStatus(FETCH_OK, candle_issue=status.candle_issue, recovered=True, recovery_source='nse')
+
+
 def _looks_rate_limited(message):
     text = str(message).lower()
     patterns = [
@@ -199,6 +245,11 @@ def fetch_history_batch(
     histories = {}
     statuses = {}
     incomplete = []
+    nse = load_nse_daily_sessions(window.daily_cutoff) if window.daily_cutoff is not None else None
+    if nse is not None:
+        print(f'NSE official daily fallback ready for {nse.latest_date}', flush=True)
+    elif window.daily_cutoff is not None:
+        print('NSE official daily fallback unavailable', flush=True)
 
     for chunk_number, chunk in enumerate(_chunks(symbol_list, batch_size), 1):
         last_error = None
@@ -239,8 +290,7 @@ def fetch_history_batch(
                 statuses[symbol] = FetchStatus(status=status, message=message)
         else:
             for symbol in chunk:
-                data, status = _clean_history(_extract_symbol_frame(downloaded, symbol, len(chunk)),
-                                              daily_cutoff=window.daily_cutoff)
+                data, status = _check_symbol(_extract_symbol_frame(downloaded, symbol, len(chunk)), symbol, window, nse)
                 statuses[symbol] = status
                 if status.status == FETCH_INCOMPLETE_CANDLE:
                     incomplete.append(symbol)
@@ -251,28 +301,23 @@ def fetch_history_batch(
             time.sleep(pause_seconds)
 
     if incomplete:
-        print(f'Retrying {len(incomplete)} symbols with incomplete Yahoo candles')
-    retry_window = window
-    if window.daily_cutoff is not None:
-        # Yahoo can return blank closes on the final requested day, then return
-        # them with a later end date. Keep the scan cutoff when reading the retry.
-        retry_window = replace(window, end=window.end + timedelta(days=1))
+        print(f'Retrying {len(incomplete)} symbols with incomplete Yahoo candles', flush=True)
     for chunk in _chunks(incomplete, min(batch_size, 20)):
         if pause_seconds > 0:
             time.sleep(pause_seconds)
         try:
-            downloaded = _download_symbols(chunk, retry_window, timeout)
+            downloaded = _download_symbols(chunk, window, timeout)
         except Exception as exc:
             print(f'Incomplete-candle retry failed: {type(exc).__name__}')
             continue
         for symbol in chunk:
-            data, status = _clean_history(_extract_symbol_frame(downloaded, symbol, len(chunk)),
-                                          daily_cutoff=window.daily_cutoff)
-            original_issue = statuses[symbol].candle_issue
+            data, status = _check_symbol(_extract_symbol_frame(downloaded, symbol, len(chunk)), symbol, window, nse)
+            original = statuses[symbol]
             # Keep the original problem if the retry returns no usable history or
             # only an older candle. An older close must not become today's signal.
-            if data is not None and data.index[-1].date().isoformat() >= original_issue['latest_returned']:
+            if data is not None and data.index[-1].date().isoformat() >= original.candle_issue['date']:
                 histories[symbol] = data
-                statuses[symbol] = FetchStatus(FETCH_OK, candle_issue=original_issue, recovered=True)
+                statuses[symbol] = FetchStatus(FETCH_OK, candle_issue=original.candle_issue, recovered=True,
+                                               recovery_source=status.recovery_source or 'yahoo')
 
     return histories, statuses

@@ -101,6 +101,8 @@ def build_scheduled_telegram_message(watchlists, coverage, candle_dates, config,
         f"Recovered on retry {coverage.get('recovered_symbols', 0):,} · "
         f"Other skips {coverage['skipped'] - coverage.get('incomplete_candle', 0):,}"
     )
+    if coverage.get('nse_recovered_symbols'):
+        lines.append(f"Recovered from NSE official candles: {coverage['nse_recovered_symbols']:,}")
     caption = lines + ['']
     for group in watchlists:
         heading = f"<b>{escape(group['label'])} ({len(group['symbols'])})</b>"
