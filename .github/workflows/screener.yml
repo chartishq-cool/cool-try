@@ -4,6 +4,15 @@ run-name: ARGUS ${{ github.event.client_payload.jobId || github.run_id }}
 on:
   repository_dispatch:
     types: [run-screener]
+  workflow_dispatch:
+    inputs:
+      timeframe:
+        description: NSE dry-run timeframe
+        type: choice
+        options:
+          - daily
+          - weekly
+        required: true
   schedule:
     - cron: '30 23 * * 0-4'   # 5:00 AM IST weekdays, both daily strategies
     - cron: '45 23 * * 0-4'   # 5:15 AM IST weekdays, both weekly strategies
@@ -24,16 +33,22 @@ jobs:
       - run: python -m pip install -r backend/requirements.txt
       - name: Run screener
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ github.event_name != 'workflow_dispatch' && secrets.TELEGRAM_BOT_TOKEN || '' }}
+          TELEGRAM_CHAT_ID: ${{ github.event_name != 'workflow_dispatch' && secrets.TELEGRAM_CHAT_ID || '' }}
           EVENT: ${{ github.event_name }}
           SCHEDULE: ${{ github.event.schedule }}
           SCAN_ID: ${{ github.event.client_payload.jobId || github.run_id }}
           MARKET: ${{ github.event.client_payload.market }}
           LOGIC: ${{ github.event.client_payload.logic }}
           TIMEFRAME: ${{ github.event.client_payload.timeframe }}
+          DRY_RUN_TIMEFRAME: ${{ inputs.timeframe }}
           PARAMS: ${{ github.event.client_payload.params }}
         run: |
+          if [ "$EVENT" = workflow_dispatch ]; then
+            python backend/screener_dispatcher.py --market NSE --logic scheduled \
+              --timeframe "$DRY_RUN_TIMEFRAME" --job-id "$SCAN_ID" --dry-run
+            exit $?
+          fi
           if [ "$EVENT" = schedule ]; then
             MARKET=NSE
             LOGIC=scheduled
@@ -44,6 +59,7 @@ jobs:
           python backend/screener_dispatcher.py --market "$MARKET" --logic "$LOGIC" \
             --timeframe "$TIMEFRAME" --params "$PARAMS" --job-id "$SCAN_ID"
       - name: Publish scan and dated CSVs
+        if: github.event_name != 'workflow_dispatch'
         env:
           SCAN_ID: ${{ github.event.client_payload.jobId || github.run_id }}
           EVENT: ${{ github.event_name }}
