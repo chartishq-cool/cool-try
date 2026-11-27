@@ -32,7 +32,8 @@ export function Coverage({ summary }: { summary: ScanSummary }) {
     <div style={{ margin: '10px 0', lineHeight: 1.6 }}>
       <div>{coverage.evaluated} of {coverage.requested} tickers evaluated · {coverage.skipped} skipped</div>
       {Boolean(coverage.incomplete_candle || coverage.recovered_symbols) &&
-        <div>{coverage.incomplete_candle ?? 0} tickers skipped for incomplete candles · {coverage.recovered_symbols ?? 0} recovered on retry</div>}
+        <div>{coverage.incomplete_candle ?? 0} tickers skipped for incomplete candles · {coverage.recovered_symbols ?? 0} recovered
+          {Boolean(coverage.nse_recovered_symbols) && ` · ${coverage.nse_recovered_symbols} from official NSE candles`}</div>}
       {(coverage.skipped > 0 || coverage.incomplete_checks > 0) &&
         <div>Partial coverage · {coverage.incomplete_checks} evaluated tickers had incomplete lookbacks.</div>}
       <details>
@@ -100,7 +101,8 @@ export default function ScanDiagnostics({ initialId }: { initialId?: string }) {
         <div aria-live="polite">
           {diagnostic.candle_issue && (
             <p>
-              {diagnostic.candle_recovered ? 'Recovered on retry.' : 'Incomplete candle.'}
+              {diagnostic.candle_recovery_source === 'nse' ? 'Recovered from the official NSE candle.' :
+                diagnostic.candle_recovered ? 'Recovered on retry.' : 'Incomplete candle.'}
               {' '}{diagnostic.candle_issue.date} · Invalid fields {diagnostic.candle_issue.invalid_fields.join(', ')}
               {' '}· Raw close {fmt(diagnostic.candle_issue.raw_close)} · Adjusted close {fmt(diagnostic.candle_issue.adjusted_close)}
               {' '}· Volume {fmt(diagnostic.candle_issue.volume)}
