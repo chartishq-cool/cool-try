@@ -6,7 +6,10 @@ export type ScanSummary = {
   market: string;
   timeframe: string;
   csv_file: string;
-  coverage: { requested: number; evaluated: number; skipped: number; incomplete_checks: number };
+  coverage: {
+    requested: number; evaluated: number; skipped: number; incomplete_checks: number;
+    incomplete_candle?: number; recovered_symbols?: number;
+  };
   settings: Record<string, number | number[] | string>;
   universe: { source: string; refreshed_at?: string; added?: string[]; removed?: string[]; unmapped?: string[] };
 };
@@ -14,6 +17,12 @@ export type ScanSummary = {
 export type TickerDiagnostic = {
   status: string;
   bars?: number;
+  latest_candle?: string;
+  candle_recovered?: boolean;
+  candle_issue?: {
+    date: string; invalid_fields: string[]; raw_close: number | null;
+    adjusted_close: number | null; volume: number | null;
+  };
   periods?: Record<string, {
     status: string; anchor?: string; close?: number; avwap?: number; turnover?: number;
     distance_pct?: number; failed_attempts?: number; crosses?: number; longest_below?: number;

@@ -5,12 +5,15 @@ Loads stock lists, executes appropriate screener, formats output.
 """
 
 from html import escape
+from collections import Counter
+from contextlib import nullcontext
 import json
 import os
 import sys
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from time import monotonic
+from tempfile import TemporaryDirectory
 import re
 import argparse
 
@@ -20,11 +23,13 @@ if str(BASE_DIR) not in sys.path:
 
 from screeners.breakout_screener import BreakoutScreener
 from screeners.pullback_screener import PullbackScreener
-from screeners.data_fetcher import fetch_history_batch
+from screeners.data_fetcher import fetch_history_batch, get_history_window
 from screeners.scan_report import write_report
+from screeners.scheduled_watchlists import scheduled_watchlists
 from screeners.telegram_notifier import (
     build_breakout_telegram_message,
     build_pullback_telegram_message,
+    build_scheduled_telegram_message,
     send_telegram_message,
 )
 
@@ -142,7 +147,8 @@ def prepare(logic, timeframe, params):
 
 def scan(args):
     end = datetime.now()
-    run_date = datetime.now(IST).date().isoformat()
+    now_ist = datetime.now(IST)
+    run_date = now_ist.date().isoformat()
     if args.logic == 'scheduled' and (args.market != 'NSE' or args.timeframe == 'monthly'):
         raise ValueError('Scheduled presets are available for daily and weekly NSE scans')
     strategies = list(STRATEGIES) if args.logic == 'scheduled' else [args.logic]
@@ -159,21 +165,47 @@ def scan(args):
 
     required = sorted({period for _, periods in setups.values() for period in periods})
     started = monotonic()
-    histories, statuses = fetch_history_batch(stocks, args.timeframe, required)
+    # The morning alerts use sessions before their IST run date. Keep the same
+    # cutoff when previewing them later in the day or when the runner is delayed.
+    scheduled_cutoff = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
+    window = get_history_window(args.timeframe, required, end=scheduled_cutoff) if args.logic == 'scheduled' else None
+    histories, statuses = fetch_history_batch(stocks, args.timeframe, required, window=window)
     print(f'History download took {monotonic() - started:.1f}s · {len(histories)}/{len(stocks)} symbols')
+    latest_candles = {symbol: data.index[-1].date().isoformat() for symbol, data in histories.items()}
+    candle_dates = Counter(latest_candles.values())
 
     for logic, (config, periods) in setups.items():
         run_id = f'{args.job_id}-{logic}' if args.logic == 'scheduled' else args.job_id
         directory = BASE_DIR / 'results' / 'runs' / run_id
+        if args.dry_run:
+            directory = args.dry_run_directory / run_id
         directory.mkdir(parents=True, exist_ok=True)
         screener = STRATEGIES[logic](stocks, args.market, args.timeframe, periods, config)
 
         df = screener.run((histories, statuses))
+        for symbol, diagnostic in screener.diagnostics.items():
+            if symbol in latest_candles:
+                diagnostic['latest_candle'] = latest_candles[symbol]
+            status = statuses.get(symbol)
+            if status and status.candle_issue:
+                diagnostic['candle_issue'] = status.candle_issue
+                diagnostic['candle_recovered'] = status.recovered
+        watchlists = scheduled_watchlists(logic, screener, config) if args.logic == 'scheduled' else None
         filename = f'{args.market.lower()}_{logic}_{args.timeframe}_{end.strftime("%d%b%Y").lower()}.csv'
         df.to_csv(directory / filename, index=False)
-        coverage = write_report(directory, screener, {**config, 'anchor_periods': periods}, universe, filename)
+        coverage = write_report(directory, screener, {**config, 'anchor_periods': periods}, universe,
+                                filename, candle_dates, watchlists)
         print(f'{run_id} · {coverage}')
-        if args.telegram_token and args.telegram_chat_id:
+        if watchlists is not None and (args.dry_run or (args.telegram_token and args.telegram_chat_id)):
+            message, caption = build_scheduled_telegram_message(
+                watchlists, coverage, candle_dates, config, args.market, logic, run_id,
+            )
+            if args.dry_run:
+                print(message)
+            else:
+                print('Telegram:', send_telegram_message(message, args.telegram_token, args.telegram_chat_id,
+                                                         attachment_caption=caption, scan_id=run_id))
+        elif not args.dry_run and args.telegram_token and args.telegram_chat_id:
             formatter = (
                 build_breakout_telegram_message if logic == 'breakout'
                 else build_pullback_telegram_message
@@ -193,10 +225,15 @@ def main():
     parser.add_argument('--job-id', default=f'local-{int(datetime.now().timestamp())}')
     parser.add_argument('--telegram-token', default=os.getenv('TELEGRAM_BOT_TOKEN'))
     parser.add_argument('--telegram-chat-id', default=os.getenv('TELEGRAM_CHAT_ID'))
+    parser.add_argument('--dry-run', action='store_true', help='Preview scheduled Telegram alerts without publishing')
     args = parser.parse_args()
     if not re.fullmatch(r'[a-z0-9-]{1,80}', args.job_id):
         parser.error('Invalid scan ID')
-    scan(args)
+    if args.dry_run and args.logic != 'scheduled':
+        parser.error('--dry-run requires --logic scheduled')
+    with TemporaryDirectory(prefix='argus-dry-run-') if args.dry_run else nullcontext() as report_dir:
+        args.dry_run_directory = Path(report_dir) if report_dir else None
+        scan(args)
 
 
 if __name__ == '__main__':
