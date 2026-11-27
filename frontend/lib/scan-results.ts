@@ -9,6 +9,7 @@ export type ScanSummary = {
   coverage: {
     requested: number; evaluated: number; skipped: number; incomplete_checks: number;
     incomplete_candle?: number; recovered_symbols?: number;
+    nse_recovered_symbols?: number;
   };
   settings: Record<string, number | number[] | string>;
   universe: { source: string; refreshed_at?: string; added?: string[]; removed?: string[]; unmapped?: string[] };
@@ -19,6 +20,7 @@ export type TickerDiagnostic = {
   bars?: number;
   latest_candle?: string;
   candle_recovered?: boolean;
+  candle_recovery_source?: 'nse' | 'yahoo';
   candle_issue?: {
     date: string; invalid_fields: string[]; raw_close: number | null;
     adjusted_close: number | null; volume: number | null;
