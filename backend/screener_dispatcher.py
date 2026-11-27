@@ -193,6 +193,8 @@ def scan(args):
             if status and status.candle_issue:
                 diagnostic['candle_issue'] = status.candle_issue
                 diagnostic['candle_recovered'] = status.recovered
+                if status.recovery_source:
+                    diagnostic['candle_recovery_source'] = status.recovery_source
         watchlists = scheduled_watchlists(logic, screener, config) if args.logic == 'scheduled' else None
         filename = f'{args.market.lower()}_{logic}_{args.timeframe}_{end.strftime("%d%b%Y").lower()}.csv'
         df.to_csv(directory / filename, index=False)
