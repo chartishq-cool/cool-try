@@ -168,7 +168,10 @@ def scan(args):
     # The morning alerts use sessions before their IST run date. Keep the same
     # cutoff when previewing them later in the day or when the runner is delayed.
     scheduled_cutoff = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
-    window = get_history_window(args.timeframe, required, end=scheduled_cutoff) if args.logic == 'scheduled' else None
+    window = (
+        get_history_window(args.timeframe, required, end=scheduled_cutoff, completed_sessions_only=True)
+        if args.logic == 'scheduled' else None
+    )
     histories, statuses = fetch_history_batch(stocks, args.timeframe, required, window=window)
     print(f'History download took {monotonic() - started:.1f}s · {len(histories)}/{len(stocks)} symbols')
     latest_candles = {symbol: data.index[-1].date().isoformat() for symbol, data in histories.items()}
